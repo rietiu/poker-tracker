@@ -45,23 +45,24 @@ export function calcPosition(totalSeats, mySeat, buttonSeat) {
   // Positions counted from BTN going left: BTN=0, SB=1, BB=2, ...EP last
   // For 6-max: BTN CO HJ MP EP SB BB  → 5 non-blind non-btn = CO(5) HJ(4) MP(3) EP(?)
   // Map offset to position name
+  // Names match TABLE_POSITIONS so History filters / badges line up.
   if (totalSeats === 6) {
-    // offsets: 0=BTN,1=SB,2=BB,3=EP,4=HJ,5=CO
-    const map = { 3: 'EP', 4: 'HJ', 5: 'CO' };
+    // offsets: 0=BTN,1=SB,2=BB,3=UTG,4=HJ,5=CO
+    const map = { 3: 'UTG', 4: 'HJ', 5: 'CO' };
     return map[offset] || 'MP';
   }
   if (totalSeats === 8) {
-    // 0=BTN,1=SB,2=BB,3=EP,4=EP,5=MP,6=HJ,7=CO
-    const map = { 3: 'EP', 4: 'EP', 5: 'MP', 6: 'HJ', 7: 'CO' };
+    // 0=BTN,1=SB,2=BB,3=UTG,4=UTG+1,5=LJ,6=HJ,7=CO
+    const map = { 3: 'UTG', 4: 'UTG+1', 5: 'LJ', 6: 'HJ', 7: 'CO' };
     return map[offset] || 'MP';
   }
   if (totalSeats === 9) {
-    // 0=BTN,1=SB,2=BB,3=EP,4=EP,5=MP,6=MP,7=HJ,8=CO
-    const map = { 3: 'EP', 4: 'EP', 5: 'MP', 6: 'MP', 7: 'HJ', 8: 'CO' };
+    // 0=BTN,1=SB,2=BB,3=UTG,4=UTG+1,5=MP,6=LJ,7=HJ,8=CO
+    const map = { 3: 'UTG', 4: 'UTG+1', 5: 'MP', 6: 'LJ', 7: 'HJ', 8: 'CO' };
     return map[offset] || 'MP';
   }
   // fallback
-  const positions = ['BTN', 'SB', 'BB', 'EP', 'MP', 'HJ', 'CO'];
+  const positions = ['BTN', 'SB', 'BB', 'UTG', 'MP', 'HJ', 'CO'];
   return positions[Math.min(offset, positions.length - 1)];
 }
 
@@ -148,20 +149,93 @@ export const TAG_META = {
 // handNet() converts that plus the recorded street actions into hero's real
 // signed profit/loss for the hand.
 
-// Chips a single position put into one street, from that street's action list.
-// Mirrors PositionSequencer's committed-tracking: bet/raise `amount` is the
-// raise-TO total, call `amount` is the full call price — so the largest such
-// value a position posts on a street is their total contribution to it.
-// `seed` = chips already posted before voluntary action (hero blind, preflop).
-function positionStreetContribution(actions, pos, seed = 0) {
-  let committed = seed;
-  for (const a of actions || []) {
-    if (a.pos !== pos) continue;
-    if (a.action === 'bet' || a.action === 'raise' || a.action === 'call') {
-      committed = Math.max(committed, Number(a.amount) || 0);
+// computeStreetState — replays one street's action list and reports the full
+// state: who acts next, current bet, running pot, folded set, per-position
+// committed chips, and the amount the next player owes. Shared by the recorder
+// UI (PositionSequencer) and the results math (heroInvested).
+// initialCommitted: { [pos]: number } — chips posted before any explicit action
+// (SB/BB blinds for preflop).
+export function computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted = {}) {
+  const foldedSet = new Set();
+  const lastActionByPos = {};
+  const committed = { ...initialCommitted }; // total chips each pos has put in this street
+  let currentBet = initialBet;
+  let runningPot = 0;
+  const actedSinceLastRaise = new Set();
+  let lastAggressorIdx = -1;
+
+  for (const a of actions) {
+    const pos = a.pos;
+    const idx = actionOrder.indexOf(pos);
+    if (idx === -1) continue;
+
+    lastActionByPos[pos] = { action: a.action, amount: a.amount || 0 };
+
+    if (a.action === 'fold') {
+      foldedSet.add(pos);
+      actedSinceLastRaise.add(pos);
+    } else if (a.action === 'bet' || a.action === 'raise') {
+      // a.amount = total raise-to amount (e.g. raise to $18, not raise by $12)
+      const total = a.amount || 0;
+      const delta = total - (committed[pos] || 0);
+      runningPot += Math.max(0, delta);
+      committed[pos] = total;
+      currentBet = total;
+      lastAggressorIdx = idx;
+      actedSinceLastRaise.clear();
+      actedSinceLastRaise.add(pos);
+    } else if (a.action === 'call') {
+      // a.amount = full call price (currentBet at time of call); delta = what they add from stack
+      const total = a.amount || currentBet;
+      const delta = total - (committed[pos] || 0);
+      runningPot += Math.max(0, delta);
+      committed[pos] = total;
+      actedSinceLastRaise.add(pos);
+    } else {
+      // check
+      actedSinceLastRaise.add(pos);
     }
   }
-  return committed;
+
+  // Determine which positions are still in
+  const activePosSet = new Set(activePositions);
+  const stillIn = actionOrder.filter(p => activePosSet.has(p) && !foldedSet.has(p));
+
+  if (stillIn.length <= 1) {
+    return { nextPos: null, currentBet, runningPot, foldedSet, lastActionByPos, toCall: 0, committed };
+  }
+
+  // Find nextPos: scan from lastAggressor+1 for someone not folded + not actedSinceLastRaise
+  const n = actionOrder.length;
+  const startIdx = lastAggressorIdx === -1 ? 0 : (lastAggressorIdx + 1) % n;
+
+  let nextPos = null;
+  for (let i = 0; i < n; i++) {
+    const idx = (startIdx + i) % n;
+    const pos = actionOrder[idx];
+    if (!activePosSet.has(pos)) continue;
+    if (foldedSet.has(pos)) continue;
+    if (!actedSinceLastRaise.has(pos)) {
+      nextPos = pos;
+      break;
+    }
+  }
+
+  // toCall = how much the next player needs to add from their stack to call
+  const toCall = nextPos ? Math.max(0, currentBet - (committed[nextPos] || 0)) : 0;
+
+  return { nextPos, currentBet, runningPot, foldedSet, lastActionByPos, toCall, committed };
+}
+
+// Chips a single position put into one street, from that street's action list.
+// `seed` = chips already posted before voluntary action (hero blind, preflop).
+function positionStreetContribution(actions, pos, seed = 0) {
+  const order = [...new Set((actions || []).map(a => a.pos))];
+  if (!order.includes(pos)) order.push(pos);
+  const { committed } = computeStreetState(
+    actions || [], order, order, 0, seed ? { [pos]: seed } : {}
+  );
+  return committed?.[pos] ?? seed;
 }
 
 // The blind hero posted this hand (0 unless hero is in SB/BB).

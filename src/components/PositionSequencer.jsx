@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS } from '../utils';
+import { PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState } from '../utils';
 
 const POT_FRACS = [
   { label: '1/3', frac: 1 / 3 },
@@ -23,80 +23,6 @@ function actionBadge(action, amount) {
   if (action === 'bet') return `B$${amount}`;
   if (action === 'raise') return `R$${amount}`;
   return '';
-}
-
-// computeStreetState — tracks full street action state
-// initialCommitted: { [pos]: number } — chips already posted before any explicit action (SB/BB for preflop)
-function computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted = {}) {
-  const foldedSet = new Set();
-  const lastActionByPos = {};
-  const committed = { ...initialCommitted }; // total chips each pos has put in this street
-  let currentBet = initialBet;
-  let runningPot = 0;
-  const actedSinceLastRaise = new Set();
-  let lastAggressorIdx = -1;
-
-  for (const a of actions) {
-    const pos = a.pos;
-    const idx = actionOrder.indexOf(pos);
-    if (idx === -1) continue;
-
-    lastActionByPos[pos] = { action: a.action, amount: a.amount || 0 };
-
-    if (a.action === 'fold') {
-      foldedSet.add(pos);
-      actedSinceLastRaise.add(pos);
-    } else if (a.action === 'bet' || a.action === 'raise') {
-      // a.amount = total raise-to amount (e.g. raise to $18, not raise by $12)
-      const total = a.amount || 0;
-      const delta = total - (committed[pos] || 0);
-      runningPot += Math.max(0, delta);
-      committed[pos] = total;
-      currentBet = total;
-      lastAggressorIdx = idx;
-      actedSinceLastRaise.clear();
-      actedSinceLastRaise.add(pos);
-    } else if (a.action === 'call') {
-      // a.amount = full call price (currentBet at time of call); delta = what they add from stack
-      const total = a.amount || currentBet;
-      const delta = total - (committed[pos] || 0);
-      runningPot += Math.max(0, delta);
-      committed[pos] = total;
-      actedSinceLastRaise.add(pos);
-    } else {
-      // check
-      actedSinceLastRaise.add(pos);
-    }
-  }
-
-  // Determine which positions are still in
-  const activePosSet = new Set(activePositions);
-  const stillIn = actionOrder.filter(p => activePosSet.has(p) && !foldedSet.has(p));
-
-  if (stillIn.length <= 1) {
-    return { nextPos: null, currentBet, runningPot, foldedSet, lastActionByPos, toCall: 0 };
-  }
-
-  // Find nextPos: scan from lastAggressor+1 for someone not folded + not actedSinceLastRaise
-  const n = actionOrder.length;
-  const startIdx = lastAggressorIdx === -1 ? 0 : (lastAggressorIdx + 1) % n;
-
-  let nextPos = null;
-  for (let i = 0; i < n; i++) {
-    const idx = (startIdx + i) % n;
-    const pos = actionOrder[idx];
-    if (!activePosSet.has(pos)) continue;
-    if (foldedSet.has(pos)) continue;
-    if (!actedSinceLastRaise.has(pos)) {
-      nextPos = pos;
-      break;
-    }
-  }
-
-  // toCall = how much the next player needs to add from their stack to call
-  const toCall = nextPos ? Math.max(0, currentBet - (committed[nextPos] || 0)) : 0;
-
-  return { nextPos, currentBet, runningPot, foldedSet, lastActionByPos, toCall };
 }
 
 /**
