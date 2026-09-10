@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, put, del, getHandsBySession } from '../db';
-import { formatMoney, isRedCard, TAG_META, randomPlayerName } from '../utils';
+import { formatMoney, isRedCard, TAG_META, randomPlayerName, sumNet, parseBB, parseSB } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector } from '../components/PlayerTag';
 
@@ -275,13 +275,10 @@ export default function SessionView() {
 
   const completedHands = hands.filter(h => !h.incomplete);
 
-  const netResult = completedHands.reduce((sum, h) => {
-    const amt = Number(h.result?.amount) || 0;
-    const outcome = h.result?.outcome;
-    if (outcome === 'won' || outcome === 'split') return sum + amt;
-    if (outcome === 'lost') return sum - Math.abs(amt);
-    return sum;
-  }, 0);
+  const netResult = sumNet(completedHands, {
+    sb: parseSB(session.game),
+    bb: parseBB(session.game),
+  });
 
   function resultClass(outcome) {
     if (outcome === 'won') return 'result-won';
