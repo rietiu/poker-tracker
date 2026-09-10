@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, put, del, getHandsBySession } from '../db';
-import { formatMoney, isRedCard, TAG_META, randomPlayerName } from '../utils';
+import { formatMoney, isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector } from '../components/PlayerTag';
 
@@ -275,28 +275,18 @@ export default function SessionView() {
 
   const completedHands = hands.filter(h => !h.incomplete);
 
-  const netResult = completedHands.reduce((sum, h) => {
-    const amt = Number(h.result?.amount) || 0;
-    const outcome = h.result?.outcome;
-    if (outcome === 'won' || outcome === 'split') return sum + amt;
-    if (outcome === 'lost') return sum - Math.abs(amt);
-    return sum;
-  }, 0);
+  const blinds = { sb: parseSB(session.game), bb: parseBB(session.game) };
+  const netResult = sumNet(completedHands, blinds);
 
-  function resultClass(outcome) {
-    if (outcome === 'won') return 'result-won';
-    if (outcome === 'lost') return 'result-lost';
-    if (outcome === 'split') return 'result-split';
-    return 'result-fold';
+  function resultClass(hand) {
+    if (hand.result?.outcome === 'folded') return 'result-fold';
+    return handNet(hand, blinds) >= 0 ? 'result-won' : 'result-lost';
   }
 
   function resultText(hand) {
-    const { outcome, amount } = hand.result || {};
-    if (outcome === 'folded') return 'Fold';
-    if (outcome === 'won') return `+${Number(amount).toLocaleString()}`;
-    if (outcome === 'lost') return `-${Math.abs(Number(amount)).toLocaleString()}`;
-    if (outcome === 'split') return `±${Number(amount).toLocaleString()}`;
-    return '';
+    if (hand.result?.outcome === 'folded') return 'Fold';
+    const n = handNet(hand, blinds);
+    return (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString();
   }
 
   const editingSeatData = editingSeat !== null
@@ -372,7 +362,7 @@ export default function SessionView() {
                   </span>
                 </div>
                 <div className="row gap-8">
-                  <span className={resultClass(hand.result?.outcome)}>
+                  <span className={resultClass(hand)}>
                     {resultText(hand)}
                   </span>
                   <button

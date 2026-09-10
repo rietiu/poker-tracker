@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSessionsSorted, getHandsBySession } from '../db';
-import { formatMoney } from '../utils';
+import { formatMoney, sumNet, parseBB, parseSB } from '../utils';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -18,15 +18,12 @@ export default function Home() {
       const nets = {};
       await Promise.all(s.map(async session => {
         const hands = await getHandsBySession(session.id);
-        counts[session.id] = hands.length;
-        const net = hands.reduce((sum, h) => {
-          const amt = Number(h.result?.amount) || 0;
-          const outcome = h.result?.outcome;
-          if (outcome === 'won' || outcome === 'split') return sum + amt;
-          if (outcome === 'lost') return sum - Math.abs(amt);
-          return sum;
-        }, 0);
-        nets[session.id] = net;
+        const real = hands.filter(h => !h.incomplete);
+        counts[session.id] = real.length;
+        nets[session.id] = sumNet(real, {
+          sb: parseSB(session.game),
+          bb: parseBB(session.game),
+        });
       }));
       setHandCounts(counts);
       setNetResults(nets);

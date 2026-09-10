@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, del } from '../db';
-import { formatCard, formatMoney, isRedCard } from '../utils';
+import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
 const CURRENCY_SYMBOLS = { USD: '$', PHP: '₱', EUR: '€', GBP: '£' };
@@ -263,6 +263,9 @@ export default function HandDetail() {
   }
 
   const res = resultText();
+  const blinds = { sb: parseSB(session?.game), bb: parseBB(session?.game) };
+  const trueNet = handNet(hand, blinds);
+  const invested = heroInvested(hand, blinds.sb, blinds.bb);
 
   async function handleDelete() {
     await del('hands', id);
@@ -291,6 +294,14 @@ export default function HandDetail() {
           {hand.holeCards?.length > 0 && <span style={{ margin: '0 8px' }}>→</span>}
           <span className={res.cls} style={{ fontSize: '1.1rem' }}>{res.text}</span>
         </div>
+        {outcome && outcome !== 'folded' && (
+          <div className={'text-sm mt-8 ' + (trueNet >= 0 ? 'result-won' : 'result-lost')}>
+            Net: {trueNet >= 0 ? '+' : '−'}{sym}{Math.abs(trueNet).toLocaleString()}
+            {!hand.quick && invested > 0 && (
+              <span className="text-muted"> · you put in {sym}{invested.toLocaleString()}</span>
+            )}
+          </div>
+        )}
         {hand.result?.notes && <div className="text-muted text-sm mt-8">{hand.result.notes}</div>}
       </div>
 
