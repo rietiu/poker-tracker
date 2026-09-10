@@ -84,6 +84,11 @@ export const TABLE_POSITIONS = {
   9: ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'],
 };
 
+// Every distinct position across table sizes, ordered late -> early then blinds.
+// History's position filter uses this so UTG / LJ / UTG+1 hands are filterable
+// (the old hard-coded list used EP/MP names that no recorded hand ever has).
+export const HISTORY_FILTER_POSITIONS = ['BTN', 'CO', 'HJ', 'LJ', 'MP', 'UTG+1', 'UTG', 'SB', 'BB'];
+
 export const PREFLOP_ACTION_ORDER = {
   6: ['UTG', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
   8: ['UTG', 'UTG+1', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
@@ -133,3 +138,91 @@ export const TAG_META = {
   maniac: { emoji: '💥', label: 'Maniac', color: '#c92a2a' },
   rock:   { emoji: '🪨', label: 'Rock',   color: '#7d5a50' },
 };
+
+// ── Money: one source of truth for a hand's net chip result ──────────────────
+//
+// Stored `result.amount` semantics are unchanged by these helpers:
+//   won   → gross net-pot (pot − rake), i.e. every chip pushed to hero
+//   lost  → chips the user typed as lost
+//   split → whatever the user typed (rare, usually blank)
+// handNet() converts that plus the recorded street actions into hero's real
+// signed profit/loss for the hand.
+
+// Chips a single position put into one street, from that street's action list.
+// Mirrors PositionSequencer's committed-tracking: bet/raise `amount` is the
+// raise-TO total, call `amount` is the full call price — so the largest such
+// value a position posts on a street is their total contribution to it.
+// `seed` = chips already posted before voluntary action (hero blind, preflop).
+function positionStreetContribution(actions, pos, seed = 0) {
+  let committed = seed;
+  for (const a of actions || []) {
+    if (a.pos !== pos) continue;
+    if (a.action === 'bet' || a.action === 'raise' || a.action === 'call') {
+      committed = Math.max(committed, Number(a.amount) || 0);
+    }
+  }
+  return committed;
+}
+
+// The blind hero posted this hand (0 unless hero is in SB/BB).
+export function heroBlindPosted(hand, sb = 1, bb = 2) {
+  if (hand?.myPosition === 'SB') return sb;
+  if (hand?.myPosition === 'BB') return bb;
+  return 0;
+}
+
+// Total chips hero put into the pot across all streets (voluntary + own blind).
+// 0 for quick hands (they store no action lists).
+export function heroInvested(hand, sb = 1, bb = 2) {
+  if (!hand || hand.quick || !hand.myPosition) return 0;
+  const pos = hand.myPosition;
+  let total = 0;
+  for (const st of ['preflop', 'flop', 'turn', 'river']) {
+    const actions = hand[st]?.actions || [];
+    const seed = st === 'preflop' ? heroBlindPosted(hand, sb, bb) : 0;
+    total += positionStreetContribution(actions, pos, seed);
+  }
+  return total;
+}
+
+// Hero's real signed net for one hand, in chips. opts: { sb, bb }.
+export function handNet(hand, opts = {}) {
+  const sb = opts.sb ?? 1;
+  const bb = opts.bb ?? 2;
+  const r = hand?.result || {};
+  const amt = Number(r.amount) || 0;
+
+  let net = 0;
+  if (hand?.quick) {
+    // Quick hands have no action lists — trust the typed amount as the net.
+    if (r.outcome === 'won' || r.outcome === 'split') net = amt;
+    else if (r.outcome === 'lost') net = -Math.abs(amt);
+  } else {
+    switch (r.outcome) {
+      case 'won':
+        net = amt - heroInvested(hand, sb, bb);
+        break;
+      case 'lost': {
+        const invested = heroInvested(hand, sb, bb);
+        net = invested > 0 ? -invested : -Math.abs(amt);
+        break;
+      }
+      case 'split':
+        net = amt !== 0 ? amt : -heroInvested(hand, sb, bb);
+        break;
+      case 'folded':
+        net = -heroBlindPosted(hand, sb, bb);
+        break;
+      default:
+        net = 0;
+    }
+  }
+  return net === 0 ? 0 : net; // normalise -0
+}
+
+// Sum of handNet over hands, ignoring unfinished drafts. opts: { sb, bb }.
+export function sumNet(hands, opts = {}) {
+  return (hands || [])
+    .filter(h => !h.incomplete)
+    .reduce((s, h) => s + handNet(h, opts), 0);
+}
