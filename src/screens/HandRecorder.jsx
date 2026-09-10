@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested } from '../utils';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
 import PositionBadge from '../components/PositionBadge';
@@ -290,7 +290,7 @@ export default function HandRecorder() {
   const turnFolded = getFoldedPositions(hand.turn.actions);
   const riverActivePositions = turnActivePositions.filter(p => !turnFolded.has(p));
 
-  const preflopStartPot = Math.round(1.5 * bb);
+  const preflopStartPot = sb + bb;
   const flopStartPot = hand.preflop.endPot || preflopStartPot;
   const turnStartPot = hand.flop.endPot || flopStartPot;
   const riverStartPot = hand.turn.endPot || turnStartPot;
@@ -473,6 +473,7 @@ export default function HandRecorder() {
             onChange={(actions, endPot) => patchStreet('flop', { actions, endPot })}
             startPot={flopStartPot}
             bb={bb}
+            sb={sb}
             currency={currency}
             onComplete={() => turnActivePositions.length <= 1 ? setStep(6) : setStep(4)}
           />
@@ -511,6 +512,7 @@ export default function HandRecorder() {
             onChange={(actions, endPot) => patchStreet('turn', { actions, endPot })}
             startPot={turnStartPot}
             bb={bb}
+            sb={sb}
             currency={currency}
             onComplete={() => riverActivePositions.length <= 1 ? setStep(6) : setStep(5)}
           />
@@ -549,6 +551,7 @@ export default function HandRecorder() {
             onChange={(actions, endPot) => patchStreet('river', { actions, endPot })}
             startPot={riverStartPot}
             bb={bb}
+            sb={sb}
             currency={currency}
             onComplete={() => setStep(6)}
           />
@@ -682,6 +685,25 @@ export default function HandRecorder() {
                   Pot {sym}{totalHandPot.toLocaleString()} − rake {sym}{effectiveRake.toLocaleString()} = {sym}{netPot.toLocaleString()}
                 </div>
               )}
+              {hand.result.outcome && hand.result.outcome !== 'folded' && (() => {
+                const handForNet = {
+                  myPosition: hand.myPosition,
+                  quick: false,
+                  preflop: { actions: hand.preflop.actions },
+                  flop: { actions: hand.flop.actions },
+                  turn: { actions: hand.turn.actions },
+                  river: { actions: hand.river.actions },
+                  result: hand.result,
+                };
+                const invested = heroInvested(handForNet, sb, bb);
+                const net = handNet(handForNet, { sb, bb });
+                return (
+                  <div className={'text-xs mt-4 ' + (net >= 0 ? 'result-won' : 'result-lost')}>
+                    Net this hand: {net >= 0 ? '+' : '−'}{sym}{Math.abs(net).toLocaleString()}
+                    <span className="text-muted"> · you put in {sym}{invested.toLocaleString()}</span>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
