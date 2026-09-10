@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllHandsSorted, getSessionsSorted } from '../db';
-import { formatMoney, isRedCard } from '../utils';
+import { formatMoney, isRedCard, sumNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
 function CardBadge({ card }) {
@@ -39,6 +39,7 @@ export default function History() {
   }, []);
 
   const filtered = hands.filter(h => {
+    if (h.incomplete) return false;
     if (filterSession && h.sessionId !== filterSession) return false;
     if (filterResult === 'won' && h.result?.outcome !== 'won') return false;
     if (filterResult === 'lost' && h.result?.outcome !== 'lost') return false;
@@ -65,14 +66,11 @@ export default function History() {
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
 
-  const POSITIONS = ['BTN', 'CO', 'HJ', 'MP', 'EP', 'SB', 'BB'];
+  const POSITIONS = HISTORY_FILTER_POSITIONS;
 
   const totalNet = filtered.reduce((sum, h) => {
-    const { outcome, amount } = h.result || {};
-    const amt = Number(amount) || 0;
-    if (outcome === 'won' || outcome === 'split') return sum + amt;
-    if (outcome === 'lost') return sum - Math.abs(amt);
-    return sum;
+    const sess = sessions.find(x => x.id === h.sessionId);
+    return sum + sumNet([h], { sb: parseSB(sess?.game), bb: parseBB(sess?.game) });
   }, 0);
 
   return (
