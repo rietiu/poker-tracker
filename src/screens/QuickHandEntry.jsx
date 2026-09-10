@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put } from '../db';
-import { uuid } from '../utils';
+import { uuid, TABLE_POSITIONS } from '../utils';
 import InlineCardPicker from '../components/InlineCardPicker';
-
-const QUICK_POSITIONS = ['BTN', 'CO', 'MP', 'UTG', 'SB', 'BB'];
 
 export default function QuickHandEntry() {
   const { id: sessionId } = useParams();
@@ -22,7 +20,7 @@ export default function QuickHandEntry() {
 
   async function saveHand() {
     const prevHands = await getHandsBySession(sessionId);
-    const handNum = prevHands.length + 1;
+    const handNum = prevHands.filter(h => !h.incomplete).length + 1;
 
     const record = {
       id: uuid(),
@@ -51,6 +49,8 @@ export default function QuickHandEntry() {
 
   if (!session) return <div className="screen"><div className="text-muted">Loading…</div></div>;
 
+  const positions = TABLE_POSITIONS[session.totalSeats] || TABLE_POSITIONS[9];
+
   return (
     <div className="screen" style={{ paddingBottom: 'calc(var(--nav-height) + 80px)' }}>
       <div className="screen-header">
@@ -62,7 +62,7 @@ export default function QuickHandEntry() {
       <div className="form-group">
         <label className="form-label">My Position</label>
         <div className="quick-pos-grid">
-          {QUICK_POSITIONS.map(pos => (
+          {positions.map(pos => (
             <button
               key={pos}
               className={'quick-pos-btn' + (position === pos ? ' selected' : '')}
