@@ -126,6 +126,93 @@ export function seatingAtHand(seats, activeSeats, mySeat, buttonSeat) {
   });
 }
 
+// Old sessions: make sure every seat exists, occupied seats have a code and
+// the old 'left' status reads as 'empty'.
+export function ensureSeatCodes(session) {
+  const total = session.totalSeats || 9;
+  const seats = Array.from({ length: total }, (_, i) => {
+    const n = i + 1;
+    const s = (session.seats || []).find(x => x.seatNum === n) || {};
+    return {
+      name: '', tags: [], estimatedStack: '', ...s, seatNum: n,
+      status: s.status === 'left' || s.status === 'empty' ? 'empty' : (s.status || 'active'),
+      code: s.code || '',
+    };
+  });
+  for (const s of seats) {
+    if (s.seatNum !== session.mySeat && s.status !== 'empty' && !s.code) {
+      s.code = nextPlayerCode(seats.map(x => x.code).filter(Boolean));
+    }
+  }
+  return { ...session, seats, seatLog: session.seatLog || [] };
+}
+
+// One seat change at the table. Returns a new session (seats + seatLog);
+// throws if a move targets a seat that isn't empty.
+export function applySeatEvent(session, event, at = new Date().toISOString()) {
+  const next = ensureSeatCodes(session);
+  const seats = next.seats.map(x => ({ ...x }));
+  const get = (n) => seats.find(x => x.seatNum === n);
+  const cleared = { code: '', name: '', tags: [], estimatedStack: '', status: 'empty' };
+  const who = (x) => ({ code: x.code || '', name: x.name || '' });
+  let mySeat = next.mySeat;
+  let log;
+  switch (event.type) {
+    case 'away':
+    case 'back': {
+      const s = get(event.seat);
+      s.status = event.type === 'away' ? 'away' : 'active';
+      log = { type: event.type, seat: event.seat, ...who(s) };
+      break;
+    }
+    case 'left': {
+      const s = get(event.seat);
+      log = { type: 'left', seat: event.seat, ...who(s) };
+      Object.assign(s, cleared);
+      break;
+    }
+    case 'seated': {
+      const s = get(event.seat);
+      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', code: nextPlayerCode(seats.map(x => x.code).filter(Boolean)) });
+      log = { type: 'seated', seat: event.seat, code: s.code };
+      break;
+    }
+    case 'move': {
+      const from = get(event.from), to = get(event.to);
+      if (to.status !== 'empty' || event.to === mySeat) throw new Error(`Seat ${event.to} is not empty`);
+      Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, status: 'active' });
+      log = { type: 'move', from: event.from, to: event.to, ...who(from) };
+      Object.assign(from, cleared);
+      break;
+    }
+    case 'heroMove': {
+      const to = get(event.to);
+      if (to.status !== 'empty') throw new Error(`Seat ${event.to} is not empty`);
+      Object.assign(to, { ...cleared, status: 'active' });
+      Object.assign(get(mySeat), cleared);
+      log = { type: 'heroMove', from: mySeat, to: event.to };
+      mySeat = event.to;
+      break;
+    }
+    default:
+      throw new Error(`Unknown seat event ${event.type}`);
+  }
+  return { ...next, mySeat, seats, seatLog: [...next.seatLog, { at, ...log }] };
+}
+
+export function describeSeatEvent(e) {
+  const label = e.name ? `${e.name} (${e.code})` : e.code;
+  switch (e.type) {
+    case 'move': return `${label} moved seat ${e.from} → ${e.to}`;
+    case 'heroMove': return `I moved seat ${e.from} → ${e.to}`;
+    case 'away': return `${label} (seat ${e.seat}) is away`;
+    case 'back': return `${label} is back in seat ${e.seat}`;
+    case 'left': return `${label} left seat ${e.seat} — empty`;
+    case 'seated': return `New player ${e.code} sat in seat ${e.seat}`;
+    default: return '';
+  }
+}
+
 // Default player codes: A, B, … Z, AA, AB, …
 export function nextPlayerCode(used) {
   const taken = new Set(used || []);

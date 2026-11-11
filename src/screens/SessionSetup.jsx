@@ -165,12 +165,17 @@ export default function SessionSetup() {
   }
 
   async function handleStart() {
+    // Every other seat starts occupied with a default code (A, B, C…); rename the
+    // players worth remembering, mark seats away / empty from the session table.
+    let codeIdx = 0;
     const seatArr = Array.from({ length: totalSeats }, (_, i) => ({
       seatNum: i + 1,
+      code: i + 1 === mySeat ? '' : String.fromCharCode(65 + codeIdx++),
       name: '',
       playerId: null,
       tags: [],
       estimatedStack: '',
+      status: 'active',
     }));
 
     const session = {
@@ -187,6 +192,7 @@ export default function SessionSetup() {
       myStack: Number(myStack) || 0,
       mySeat,
       seats: seatArr,
+      seatLog: [],
       createdAt: new Date().toISOString(),
     };
 
