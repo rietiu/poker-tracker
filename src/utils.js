@@ -189,6 +189,53 @@ export function recentGames(sessions, currency) {
   return recentValues(shown, 'game', s => (s.currency || 'USD') === currency);
 }
 
+// ── Session profiles ──────────────────────────────────────────────────────────
+// Every venue + currency + blind level played becomes a profile carrying the
+// settings of its most recent session (table size, rake, cap, jackpot), so a
+// changed cap only has to be entered once. Most recently used first.
+export function sessionProfiles(sessions) {
+  const norm = (v) => (v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const sorted = [...(sessions || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const byKey = new Map();
+  for (const s of sorted) {
+    const currency = s.currency || 'USD';
+    const game = formatGame(s.game, currency);
+    if (!game) continue;
+    const key = `${norm(s.venue)}|${currency}|${norm(game)}`;
+    const seen = byKey.get(key);
+    if (seen) { seen.timesPlayed += 1; continue; }
+    byKey.set(key, {
+      key,
+      venue: (s.venue || '').trim(),
+      currency,
+      game,
+      totalSeats: s.totalSeats || 9,
+      rakeType: s.rakeType || 'percent',
+      rake: s.rake ?? null,
+      rakeMax: s.rakeMax || 0,
+      jackpot: s.jackpot || 0,
+      lastUsed: s.createdAt,
+      timesPlayed: 1,
+    });
+  }
+  return [...byKey.values()];
+}
+
+// "9-max · 10% cap ₱500 · JP ₱20"
+export function profileSummary(p) {
+  const sym = currencySymbol(p.currency);
+  const parts = [`${p.totalSeats || 9}-max`];
+  if (p.rake == null || p.rake === '') {
+    parts.push('no rake');
+  } else if ((p.rakeType || 'percent') === 'percent') {
+    parts.push(`${p.rake}% ${Number(p.rakeMax) > 0 ? `cap ${sym}${Number(p.rakeMax).toLocaleString('en-US')}` : 'no cap'}`);
+  } else {
+    parts.push(`${sym}${Number(p.rake).toLocaleString('en-US')} flat`);
+  }
+  if (Number(p.jackpot) > 0) parts.push(`JP ${sym}${Number(p.jackpot).toLocaleString('en-US')}`);
+  return parts.join(' · ');
+}
+
 export function getSbSeat(buttonSeat, totalSeats) {
   return (buttonSeat % totalSeats) + 1;
 }
