@@ -155,8 +155,11 @@ export const TAG_META = {
 // UI (PositionSequencer) and the results math (heroInvested).
 // initialCommitted: { [pos]: number } — chips posted before any explicit action
 // (SB/BB blinds for preflop).
-export function computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted = {}) {
+// allInBefore: positions that went all-in on an earlier street — still in the
+// hand (eligible for pots) but never asked to act again.
+export function computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted = {}, allInBefore = []) {
   const foldedSet = new Set();
+  const allInSet = new Set(allInBefore);
   const lastActionByPos = {};
   const committed = { ...initialCommitted }; // total chips each pos has put in this street
   let currentBet = initialBet;
@@ -169,7 +172,8 @@ export function computeStreetState(actions, actionOrder, activePositions, initia
     const idx = actionOrder.indexOf(pos);
     if (idx === -1) continue;
 
-    lastActionByPos[pos] = { action: a.action, amount: a.amount || 0 };
+    lastActionByPos[pos] = { action: a.action, amount: a.amount || 0, allIn: !!a.allIn };
+    if (a.allIn) allInSet.add(pos);
 
     if (a.action === 'fold') {
       foldedSet.add(pos);
@@ -201,9 +205,11 @@ export function computeStreetState(actions, actionOrder, activePositions, initia
   const activePosSet = new Set(activePositions);
   const stillIn = actionOrder.filter(p => activePosSet.has(p) && !foldedSet.has(p));
 
-  if (stillIn.length <= 1) {
-    return { nextPos: null, currentBet, runningPot, foldedSet, lastActionByPos, toCall: 0, committed };
-  }
+  const canAct = stillIn.filter(p => !allInSet.has(p));
+  const done = { nextPos: null, currentBet, runningPot, foldedSet, lastActionByPos, toCall: 0, committed, allInSet };
+  if (stillIn.length <= 1 || canAct.length === 0) return done;
+  // Everyone else is all-in: the last player only acts if they still owe chips.
+  if (canAct.length === 1 && (committed[canAct[0]] || 0) >= currentBet) return done;
 
   // Find nextPos: scan from lastAggressor+1 for someone not folded + not actedSinceLastRaise
   const n = actionOrder.length;
@@ -215,6 +221,7 @@ export function computeStreetState(actions, actionOrder, activePositions, initia
     const pos = actionOrder[idx];
     if (!activePosSet.has(pos)) continue;
     if (foldedSet.has(pos)) continue;
+    if (allInSet.has(pos)) continue;
     if (!actedSinceLastRaise.has(pos)) {
       nextPos = pos;
       break;
@@ -224,7 +231,7 @@ export function computeStreetState(actions, actionOrder, activePositions, initia
   // toCall = how much the next player needs to add from their stack to call
   const toCall = nextPos ? Math.max(0, currentBet - (committed[nextPos] || 0)) : 0;
 
-  return { nextPos, currentBet, runningPot, foldedSet, lastActionByPos, toCall, committed };
+  return { nextPos, currentBet, runningPot, foldedSet, lastActionByPos, toCall, committed, allInSet };
 }
 
 // Chips a single position put into one street, from that street's action list.
@@ -325,10 +332,10 @@ export function nextHandNum(hands) {
 // emitted as folds; with ctx.close, every seat still due to act is folded too.
 // Hero is never an implied fold: skipping hero returns error 'hero-skipped'.
 export function materializeStreet(taps, ctx) {
-  const { actionOrder, activePositions, initialBet = 0, initialCommitted = {}, hero = null, close = false } = ctx;
+  const { actionOrder, activePositions, initialBet = 0, initialCommitted = {}, hero = null, close = false, allInBefore = [] } = ctx;
   const actions = [];
   const nextOf = () =>
-    computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted).nextPos;
+    computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted, allInBefore).nextPos;
 
   const foldUntil = (target) => {
     for (;;) {
@@ -343,7 +350,9 @@ export function materializeStreet(taps, ctx) {
   for (const t of taps || []) {
     const err = foldUntil(t.pos);
     if (err) return { actions, nextPos: nextOf(), error: err };
-    actions.push({ pos: t.pos, action: t.action, amount: t.amount || 0 });
+    actions.push(t.allIn
+      ? { pos: t.pos, action: t.action, amount: t.amount || 0, allIn: true }
+      : { pos: t.pos, action: t.action, amount: t.amount || 0 });
   }
   if (close) {
     const err = foldUntil(null);
@@ -356,12 +365,14 @@ export function materializeStreet(taps, ctx) {
 export function tapsFromActions(actions, hero) {
   return (actions || [])
     .filter(a => a.action !== 'fold' || a.pos === hero)
-    .map(a => ({ pos: a.pos, action: a.action, amount: a.amount || 0 }));
+    .map(a => (a.allIn
+      ? { pos: a.pos, action: a.action, amount: a.amount || 0, allIn: true }
+      : { pos: a.pos, action: a.action, amount: a.amount || 0 }));
 }
 
 function streetStateAfter(taps, ctx) {
   const { actions } = materializeStreet(taps, { ...ctx, close: false });
-  return computeStreetState(actions, ctx.actionOrder, ctx.activePositions, ctx.initialBet || 0, ctx.initialCommitted || {});
+  return computeStreetState(actions, ctx.actionOrder, ctx.activePositions, ctx.initialBet || 0, ctx.initialCommitted || {}, ctx.allInBefore || []);
 }
 
 // Default action for tapping `pos`: call if it owes chips, else check.
@@ -377,4 +388,14 @@ export function betTap(tapsBefore, pos, amount, ctx) {
   const { currentBet } = streetStateAfter(tapsBefore, ctx);
   if (!isValidBetAmount(amount, currentBet)) return null;
   return { pos, action: currentBet > 0 ? 'raise' : 'bet', amount: Number(amount) };
+}
+
+// All-in for `amount` (raise-to / total committed this street) by `pos` after
+// `tapsBefore`. Above the current bet → bet/raise; at or below → call for less.
+export function allInTap(tapsBefore, pos, amount, ctx) {
+  const n = Number(amount);
+  const { currentBet, committed } = streetStateAfter(tapsBefore, ctx);
+  if (!Number.isFinite(n) || n <= (committed[pos] || 0)) return null;
+  if (n > currentBet) return { pos, action: currentBet > 0 ? 'raise' : 'bet', amount: n, allIn: true };
+  return { pos, action: 'call', amount: n, allIn: true };
 }
