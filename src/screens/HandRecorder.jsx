@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero } from '../utils';
+import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
 import PositionBadge from '../components/PositionBadge';
@@ -59,6 +60,8 @@ export default function HandRecorder() {
   const [pendingRake, setPendingRake] = useState('');
   const [pendingRakeType, setPendingRakeType] = useState('percent');
   const [pendingRakeMax, setPendingRakeMax] = useState('');
+  const [pendingJackpot, setPendingJackpot] = useState('');
+  const [relocatedNote, setRelocatedNote] = useState('');
   const [prevPreflopActions, setPrevPreflopActions] = useState(null);
 
   useEffect(() => {
@@ -183,6 +186,7 @@ export default function HandRecorder() {
       rakeType: pendingRakeType,
       rake: Number(pendingRake) || 0,
       rakeMax: Number(pendingRakeMax) || 0,
+      jackpot: Number(pendingJackpot) || 0,
     };
     await put('sessions', updated);
     setSession(updated);
@@ -303,24 +307,68 @@ export default function HandRecorder() {
   const turnStartPot = hand.flop.endPot || flopStartPot;
   const riverStartPot = hand.turn.endPot || turnStartPot;
 
-  const totalHandPot = (() => {
-    if (hand.river.actions.length > 0 && hand.river.endPot > 0) return hand.river.endPot;
-    if (hand.turn.actions.length > 0 && hand.turn.endPot > 0) return hand.turn.endPot;
-    if (hand.flop.actions.length > 0 && hand.flop.endPot > 0) return hand.flop.endPot;
-    return hand.preflop.endPot > 0 ? hand.preflop.endPot : preflopStartPot;
-  })();
+  // ── Pots, side pots, rake (src/pots.js) ──────────────────────────────────────
+  const STREETS = ['preflop', 'flop', 'turn', 'river'];
+  const handForCalc = Object.fromEntries(STREETS.map(st => [st, { actions: hand[st].actions }]));
+  const { pots, uncalled } = buildPots(handContributions(handForCalc, sb, bb), foldedPositions(handForCalc));
+  const calledPot = pots.reduce((n, p) => n + p.amount, 0);
+  const preflopOnly = endedPreflop(handForCalc);
+  const rakeInfo = computeRake(calledPot, preflopOnly, session);
+  const netPot = Math.max(0, calledPot - rakeInfo.total);
+  const multiPot = pots.length > 1;
+  const potLabel = (i) => (i === 0 ? 'Main pot' : `Side pot ${i}`);
 
-  const effectiveRake = (() => {
-    const r = session?.rake ?? null;
-    if (r === null) return 0;
-    if ((session?.rakeType || 'flat') === 'percent') {
-      const amt = Math.round(totalHandPot * r / 100);
-      return (session?.rakeMax > 0) ? Math.min(amt, session.rakeMax) : amt;
+  // What hero takes if hero wins every pot hero is in.
+  const wonTake = heroTake(
+    pots.map(p => ({ ...p, winners: p.eligible.includes(hand.myPosition) ? [hand.myPosition] : [] })),
+    hand.myPosition, rakeInfo.total, uncalled,
+  );
+  // What hero should have pushed to them given the winners picked so far (#5).
+  const suggestedTake = (() => {
+    const res = hand.result;
+    if (multiPot) {
+      if (!res.potWinners) return null;
+      return heroTake(pots.map((p, i) => ({ ...p, winners: res.potWinners[i] || [] })), hand.myPosition, rakeInfo.total, uncalled);
     }
-    return r;
+    return res.outcome === 'won' ? wonTake : null;
   })();
 
-  const netPot = Math.max(0, totalHandPot - effectiveRake);
+  function togglePotWinner(i, pos) {
+    const current = hand.result.potWinners || pots.map(() => []);
+    const next = current.map((w, j) => (j !== i ? w : w.includes(pos) ? w.filter(x => x !== pos) : [...w, pos]));
+    const take = heroTake(pots.map((p, j) => ({ ...p, winners: next[j] || [] })), hand.myPosition, rakeInfo.total, uncalled);
+    patchHand({ result: {
+      ...hand.result,
+      potWinners: next,
+      pots: pots.map((p, j) => ({ ...p, winners: next[j] || [] })),
+      outcome: take > 0 ? 'won' : 'lost',
+      winner: '',
+      amount: String(take),
+    } });
+  }
+
+  // #6: hero picked a different seat after recording — move hero's actions with them.
+  function changePosition(pos) {
+    const old = hand.myPosition;
+    const hasActions = STREETS.some(st => hand[st].actions.length > 0);
+    if (!old || old === pos || !hasActions) { patchHand({ myPosition: pos }); return; }
+    const moved = relocateHero(Object.fromEntries(STREETS.map(st => [st, hand[st].actions])), old, pos, { totalSeats, sb, bb });
+    const potThrough = (k) => {
+      const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(st => [st, { actions: moved[st] || [] }]));
+      return Object.values(handContributions(partial, sb, bb)).reduce((a, b) => a + b, 0);
+    };
+    setHand(prev => {
+      const next = { ...prev, myPosition: pos, result: { outcome: '', amount: '', notes: prev.result.notes || '', winner: '' } };
+      STREETS.forEach((st, k) => {
+        const acts = moved[st] || [];
+        next[st] = { ...prev[st], actions: acts, endPot: acts.length ? potThrough(k) : 0 };
+      });
+      return next;
+    });
+    setRelocatedNote(`Your actions moved from ${old} to ${pos}. Check each street — anything that no longer fits was removed, and the result needs picking again.`);
+  }
+
+  const allInThrough = (k) => [...new Set(STREETS.slice(0, k + 1).flatMap(st => hand[st].actions.filter(a => a.allIn).map(a => a.pos)))];
 
   const finalRemaining = (() => {
     const riverFoldedSet = getFoldedPositions(hand.river.actions);
@@ -366,7 +414,7 @@ export default function HandRecorder() {
       return;
     }
     if (finalRemaining.length <= 1 && finalRemaining.includes(hand.myPosition)) {
-      patchHand({ result: { ...hand.result, outcome: 'won', amount: String(netPot), winner: hand.myPosition } });
+      patchHand({ result: { ...hand.result, outcome: 'won', amount: String(wonTake), winner: hand.myPosition } });
     }
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -421,7 +469,7 @@ export default function HandRecorder() {
                 <button
                   key={pos}
                   className={'quick-pos-btn' + (hand.myPosition === pos ? ' selected' : '')}
-                  onClick={() => patchHand({ myPosition: pos })}
+                  onClick={() => changePosition(pos)}
                 >
                   {pos}
                 </button>
@@ -429,6 +477,7 @@ export default function HandRecorder() {
             </div>
           </div>
 
+          {relocatedNote && <div className="relocated-note text-sm mb-12">{relocatedNote}</div>}
           {hand.myPosition && (
             <div className="card" style={{ textAlign: 'center' }}>
               <div className="text-muted text-sm mb-8">My Position</div>
@@ -501,6 +550,7 @@ export default function HandRecorder() {
             street="flop"
             myPosition={hand.myPosition}
             activePositions={flopActivePositions}
+            allInBefore={allInThrough(0)}
             actions={hand.flop.actions}
             onChange={(actions, endPot) => patchStreet('flop', { actions, endPot })}
             startPot={flopStartPot}
@@ -540,6 +590,7 @@ export default function HandRecorder() {
             street="turn"
             myPosition={hand.myPosition}
             activePositions={turnActivePositions}
+            allInBefore={allInThrough(1)}
             actions={hand.turn.actions}
             onChange={(actions, endPot) => patchStreet('turn', { actions, endPot })}
             startPot={turnStartPot}
@@ -579,6 +630,7 @@ export default function HandRecorder() {
             street="river"
             myPosition={hand.myPosition}
             activePositions={riverActivePositions}
+            allInBefore={allInThrough(2)}
             actions={hand.river.actions}
             onChange={(actions, endPot) => patchStreet('river', { actions, endPot })}
             startPot={riverStartPot}
@@ -608,12 +660,35 @@ export default function HandRecorder() {
           <div className="result-pot-card">
             <div className="result-pot-row">
               <span>Final pot</span>
-              <strong>{sym}{totalHandPot.toLocaleString()}</strong>
+              <strong>{sym}{calledPot.toLocaleString()}</strong>
             </div>
-            {effectiveRake > 0 && (
+            {multiPot && pots.map((p, i) => (
+              <div key={i} className="result-pot-row text-muted text-sm">
+                <span>{potLabel(i)} · {p.eligible.map(x => (x === hand.myPosition ? 'Me' : x)).join(', ')}</span>
+                <span>{sym}{p.amount.toLocaleString()}</span>
+              </div>
+            ))}
+            {uncalled && (
+              <div className="result-pot-row text-muted text-sm">
+                <span>Uncalled, back to {uncalled.pos === hand.myPosition ? 'me' : uncalled.pos}</span>
+                <span>{sym}{uncalled.amount.toLocaleString()}</span>
+              </div>
+            )}
+            {rakeInfo.rake > 0 && (
               <div className="result-pot-row text-muted text-sm">
                 <span>Rake</span>
-                <span>−{sym}{effectiveRake.toLocaleString()}</span>
+                <span>−{sym}{rakeInfo.rake.toLocaleString()}</span>
+              </div>
+            )}
+            {rakeInfo.jackpot > 0 && (
+              <div className="result-pot-row text-muted text-sm">
+                <span>Jackpot</span>
+                <span>−{sym}{rakeInfo.jackpot.toLocaleString()}</span>
+              </div>
+            )}
+            {preflopOnly && session?.rake != null && (
+              <div className="result-pot-row text-muted text-xs">
+                <span>Ended pre-flop — no rake</span><span />
               </div>
             )}
             <div className="result-pot-row result-pot-net">
@@ -655,6 +730,14 @@ export default function HandRecorder() {
                   Apply
                 </button>
               </div>
+              <input
+                type="number"
+                className="form-input mt-8"
+                placeholder="Jackpot per hand (optional)"
+                value={pendingJackpot}
+                onChange={e => setPendingJackpot(e.target.value)}
+                inputMode="numeric"
+              />
             </div>
           )}
 
@@ -662,7 +745,30 @@ export default function HandRecorder() {
           {heroFolded && (
             <div className="result-auto-won result-folded-banner">You folded</div>
           )}
-          {!heroFolded && finalRemaining.length <= 1 && finalRemaining.includes(hand.myPosition) ? (
+          {!heroFolded && multiPot ? (
+            <div className="form-group">
+              <label className="form-label">Who won each pot? <span className="text-muted text-xs">(tap two to split)</span></label>
+              {pots.map((p, i) => (
+                <div key={i} className="pot-winner-row">
+                  <div className="text-sm mb-8">{potLabel(i)} · {sym}{p.amount.toLocaleString()}</div>
+                  <div className="action-row" style={{ flexWrap: 'wrap' }}>
+                    {p.eligible.map(pos => {
+                      const sel = (hand.result.potWinners?.[i] || []).includes(pos);
+                      return (
+                        <button
+                          key={pos}
+                          className={'action-btn' + (sel ? ' selected' + (pos !== hand.myPosition ? ' fold' : '') : '')}
+                          onClick={() => togglePotWinner(i, pos)}
+                        >
+                          {pos === hand.myPosition ? 'Me' : pos}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : !heroFolded && finalRemaining.length <= 1 && finalRemaining.includes(hand.myPosition) ? (
             <div className="result-auto-won">You win — everyone else folded</div>
           ) : (
             <div className="form-group">
@@ -687,7 +793,7 @@ export default function HandRecorder() {
                         ...hand.result,
                         outcome: iWon ? 'won' : 'lost',
                         winner: pos,
-                        amount: iWon ? String(netPot) : hand.result.amount || '',
+                        amount: iWon ? String(wonTake) : hand.result.amount || '',
                       }});
                     }}
                   >
@@ -731,9 +837,20 @@ export default function HandRecorder() {
                 inputMode="numeric"
               />
               </>)}
-              {hand.result.outcome === 'won' && effectiveRake > 0 && (
+              {suggestedTake != null && Number(hand.result.amount) !== suggestedTake && (
+                <div className="recalc-hint text-xs mt-4">
+                  <span>Pot is now {sym}{suggestedTake.toLocaleString()} for you</span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => patchHand({ result: { ...hand.result, amount: String(suggestedTake) } })}
+                  >
+                    Recalculate
+                  </button>
+                </div>
+              )}
+              {hand.result.outcome === 'won' && rakeInfo.total > 0 && Number(hand.result.amount) === suggestedTake && (
                 <div className="text-muted text-xs mt-4">
-                  Pot {sym}{totalHandPot.toLocaleString()} − rake {sym}{effectiveRake.toLocaleString()} = {sym}{netPot.toLocaleString()}
+                  Pot {sym}{calledPot.toLocaleString()} − rake/jackpot {sym}{rakeInfo.total.toLocaleString()} = {sym}{netPot.toLocaleString()}
                 </div>
               )}
               {hand.result.outcome && (() => {

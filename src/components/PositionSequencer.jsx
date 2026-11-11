@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState,
-  materializeStreet, tapsFromActions, facingTap, betTap,
+  materializeStreet, tapsFromActions, facingTap, betTap, allInTap,
 } from '../utils';
 
 const POT_FRACS = [
@@ -15,7 +15,8 @@ const RERAISE_MULTIPLES = [2.5, 3, 4];    // facing a bet, × current bet
 
 const CURRENCY_SYMBOLS = { USD: '$', PHP: '₱', EUR: '€', GBP: '£' };
 
-function actionBadge(action, amount, sym) {
+function actionBadge(action, amount, sym, allIn) {
+  if (allIn) return `AI${sym}${amount}`;
   if (action === 'fold') return 'F';
   if (action === 'check') return 'X';
   if (action === 'call') return `C${sym}${amount}`;
@@ -34,6 +35,7 @@ function actionBadge(action, amount, sym) {
  *   onChange(actions, endPot)   — stored actions for this street
  *   onComplete(actions)         — street finished (closed actions, or hero folded)
  *   prevPreflopActions          — previous hand's pre-flop actions ("Same as last hand")
+ *   allInBefore                 — positions all-in on an earlier street (never asked to act)
  */
 export default function PositionSequencer({
   totalSeats,
@@ -48,6 +50,7 @@ export default function PositionSequencer({
   currency = 'USD',
   onComplete = null,
   prevPreflopActions = null,
+  allInBefore = [],
 }) {
   const sym = CURRENCY_SYMBOLS[currency] || '$';
   const isPreflop = street === 'preflop';
@@ -65,9 +68,10 @@ export default function PositionSequencer({
     initialBet: isPreflop ? bb : 0,
     initialCommitted: isPreflop ? { SB: sbVal, BB: bb } : {},
     hero: myPosition,
+    allInBefore,
   };
   const stateOf = (acts) =>
-    computeStreetState(acts, actionOrder, activePositions, ctx.initialBet, ctx.initialCommitted);
+    computeStreetState(acts, actionOrder, activePositions, ctx.initialBet, ctx.initialCommitted, allInBefore);
 
   const taps = tapsFromActions(actions, myPosition);
   const open = materializeStreet(taps, ctx);
@@ -121,6 +125,14 @@ export default function PositionSequencer({
   const tapsBeforeRaise = taps.slice(0, -1);
   const raiseBase = raiseFor ? stateOf(materializeStreet(tapsBeforeRaise, ctx).actions) : null;
   const pendingTap = raiseFor ? betTap(tapsBeforeRaise, raiseFor, pendingAmount, ctx) : null;
+  const pendingAllIn = raiseFor ? allInTap(tapsBeforeRaise, raiseFor, pendingAmount, ctx) : null;
+
+  function commitAllIn() {
+    if (!pendingAllIn) return;
+    setRaiseFor(null);
+    setPendingAmount('');
+    emit([...tapsBeforeRaise, pendingAllIn]);
+  }
 
   function commitBet(amount) {
     const t = betTap(tapsBeforeRaise, raiseFor, amount, ctx);
@@ -189,7 +201,9 @@ export default function PositionSequencer({
       </div>
 
       <div className="seq-hint text-muted text-xs">
-        Tap seats that acted, in order — untapped seats fold. Tap the last seat again to bet / raise.
+        {taps.length === 0 && !closed.error && closed.nextPos === null && closed.actions.length === 0
+          ? 'No one can act — everyone left is all-in. Tap Done.'
+          : 'Tap seats that acted, in order — untapped seats fold. Tap the last seat again to bet / raise / all-in.'}
       </div>
 
       <div className="pos-grid">
@@ -220,6 +234,7 @@ export default function PositionSequencer({
             >
               <span className="pos-tile-name" style={{ color: isNext ? posColor : undefined }}>{pos}</span>
               {isMe && <span className="pos-tile-me">You</span>}
+              {allInBefore.includes(pos) && <span className="pos-tile-action act-bet">All-in</span>}
               {act && (
                 <span
                   className={
@@ -229,7 +244,7 @@ export default function PositionSequencer({
                      act.action === 'call' ? ' act-call' : ' act-bet')
                   }
                 >
-                  {actionBadge(act.action, act.amount, sym)}
+                  {actionBadge(act.action, act.amount, sym, act.allIn)}
                 </span>
               )}
             </button>
@@ -263,8 +278,12 @@ export default function PositionSequencer({
             <button className="btn btn-primary btn-sm" disabled={!pendingTap} style={{ opacity: pendingTap ? 1 : 0.5 }} onClick={() => commitBet(pendingAmount)}>
               OK
             </button>
+            <button className="btn btn-secondary btn-sm seq-allin" disabled={!pendingAllIn} style={{ opacity: pendingAllIn ? 1 : 0.5 }} onClick={commitAllIn}>
+              All-in
+            </button>
           </div>
-          {pendingAmount !== '' && !pendingTap && (
+          <div className="text-muted text-xs mt-4">All-in: type the player's whole stack for this street (less than the bet = all-in call).</div>
+          {pendingAmount !== '' && !pendingTap && !pendingAllIn && (
             <div className="text-xs mt-4 result-lost">
               {raiseBase.currentBet > 0
                 ? `Raise must be more than ${sym}${raiseBase.currentBet.toLocaleString()}`

@@ -1463,3 +1463,7 @@ h3 { font-size: 1rem; font-weight: 600; }
   box-shadow: 0 6px 20px rgba(0,0,0,0.4);
   font-size: 0.9rem;
 }
+.seq-allin { color: var(--gold); border-color: rgba(244,196,48,0.5); }
+.pot-winner-row { margin-bottom: 12px; }
+.recalc-hint { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--gold); }
+.relocated-note { color: var(--gold); border: 1px solid rgba(244,196,48,0.35); border-radius: var(--radius); padding: 8px 12px; }
