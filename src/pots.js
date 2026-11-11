@@ -1,0 +1,112 @@
+// Pots, side pots and rake — pure helpers over a hand's recorded actions.
+import { computeStreetState } from './utils.js';
+
+const STREETS = ['preflop', 'flop', 'turn', 'river'];
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// Positions that folded on any street.
+export function foldedPositions(hand) {
+  const out = new Set();
+  for (const st of STREETS) {
+    for (const a of hand?.[st]?.actions || []) if (a.action === 'fold') out.add(a.pos);
+  }
+  return out;
+}
+
+// Chips each position put in over the whole hand (posted blinds included).
+export function handContributions(hand, sb = 1, bb = 2) {
+  const total = {};
+  for (const st of STREETS) {
+    const actions = hand?.[st]?.actions || [];
+    const isPre = st === 'preflop';
+    const order = [...new Set([...(isPre ? ['SB', 'BB'] : []), ...actions.map(a => a.pos)])];
+    if (order.length === 0) continue;
+    const { committed } = computeStreetState(actions, order, order, 0, isPre ? { SB: sb, BB: bb } : {});
+    for (const pos of order) total[pos] = (total[pos] || 0) + (committed[pos] || 0);
+  }
+  return total;
+}
+
+// True when the pot was taken pre-flop (everyone else folded) — no rake, no jackpot.
+export function endedPreflop(hand) {
+  const actions = hand?.preflop?.actions || [];
+  const dealt = new Set(['SB', 'BB', ...actions.map(a => a.pos)]);
+  const folded = new Set(actions.filter(a => a.action === 'fold').map(a => a.pos));
+  return [...dealt].filter(p => !folded.has(p)).length <= 1;
+}
+
+// contributions: { pos: chips }, folded: Set of folded positions.
+// Returns { pots: [{ amount, eligible: [pos] }], uncalled: { pos, amount } | null }.
+// Main pot first. The part of the biggest contribution nobody matched is
+// returned to that player (uncalled), not put in a pot.
+export function buildPots(contributions, folded) {
+  const contrib = { ...contributions };
+  const players = Object.keys(contrib);
+
+  let uncalled = null;
+  const sorted = [...players].sort((a, b) => contrib[b] - contrib[a]);
+  if (sorted.length && !folded.has(sorted[0])) {
+    const top = contrib[sorted[0]];
+    const second = sorted.length > 1 ? contrib[sorted[1]] : 0;
+    if (top > second) {
+      uncalled = { pos: sorted[0], amount: round2(top - second) };
+      contrib[sorted[0]] = second;
+    }
+  }
+
+  const live = players.filter(p => !folded.has(p));
+  const levels = [...new Set(live.map(p => contrib[p]).filter(v => v > 0))].sort((a, b) => a - b);
+  const pots = [];
+  let prev = 0;
+  levels.forEach((level, i) => {
+    const isLast = i === levels.length - 1;
+    let amount = 0;
+    for (const p of players) {
+      const c = contrib[p];
+      // folded chips above the top live level still belong in the last pot
+      const cap = isLast ? Math.max(c, level) : level;
+      amount += Math.max(0, Math.min(c, cap) - Math.min(c, prev));
+    }
+    const eligible = live.filter(p => contrib[p] >= level).sort();
+    const last = pots[pots.length - 1];
+    if (last && last.eligible.join() === eligible.join()) last.amount = round2(last.amount + amount);
+    else if (amount > 0) pots.push({ amount: round2(amount), eligible });
+    prev = level;
+  });
+
+  return { pots, uncalled };
+}
+
+// cfg: { rakeType: 'percent' | 'flat', rake, rakeMax, jackpot } (session settings).
+export function computeRake(calledPot, preflopOnly, cfg) {
+  const none = { rake: 0, jackpot: 0, total: 0 };
+  if (!cfg || preflopOnly || !(calledPot > 0)) return none;
+  let rake = 0;
+  const r = Number(cfg.rake) || 0;
+  if (r > 0) {
+    if ((cfg.rakeType || 'flat') === 'percent') {
+      rake = Math.round(calledPot * r / 100);
+      if (Number(cfg.rakeMax) > 0) rake = Math.min(rake, Number(cfg.rakeMax));
+    } else {
+      rake = r;
+    }
+  }
+  rake = Math.min(rake, calledPot);
+  const jackpot = Math.min(Number(cfg.jackpot) || 0, calledPot - rake);
+  return { rake, jackpot, total: rake + jackpot };
+}
+
+// Chips pushed to `hero`: pots won (rake + jackpot come out of the main pot
+// first; split pots divide evenly) plus hero's own uncalled chips.
+export function heroTake(potsWithWinners, hero, rakeTotal = 0, uncalled = null) {
+  let toTake = rakeTotal;
+  let take = 0;
+  for (const pot of potsWithWinners || []) {
+    const cut = Math.min(toTake, pot.amount);
+    toTake -= cut;
+    const winners = pot.winners || [];
+    if (winners.includes(hero)) take += (pot.amount - cut) / winners.length;
+  }
+  if (uncalled && uncalled.pos === hero) take += uncalled.amount;
+  return round2(take);
+}
