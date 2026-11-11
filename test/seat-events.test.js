@@ -49,6 +49,14 @@ describe('applySeatEvent', () => {
     expect(() => applySeatEvent(base(), { type: 'move', from: 2, to: 5 }, at)).toThrow();
     expect(() => applySeatEvent(base(), { type: 'heroMove', to: 5 }, at)).toThrow();
   });
+  it("a code is never reused in a session — a new player never gets a departed player's code", () => {
+    const s1 = applySeatEvent(base(), { type: 'left', seat: 6 }, at);        // D leaves
+    const s2 = applySeatEvent(s1, { type: 'seated', seat: 6 }, at);          // someone new sits
+    expect(seat(s2, 6).code).toBe('E');
+    const s3 = applySeatEvent(s2, { type: 'left', seat: 6 }, at);            // E leaves too
+    const s4 = applySeatEvent(s3, { type: 'seated', seat: 3 }, at);
+    expect(seat(s4, 3).code).toBe('F');
+  });
   it('does not mutate the input', () => {
     const s0 = base();
     applySeatEvent(s0, { type: 'left', seat: 2 }, at);

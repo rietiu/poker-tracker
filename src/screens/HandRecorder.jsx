@@ -543,7 +543,7 @@ export default function HandRecorder() {
                       <span>{n}</span>
                       <span className="seat-sub">{out ? (seat.status === 'away' ? 'Away' : 'Empty') : who}</span>
                       {!out && buttonSeat && (
-                        <span className="seat-sub">{n === buttonSeat ? 'D' : positionAmong(activeSeats, n, buttonSeat)}</span>
+                        <span className="seat-sub">{positionAmong(activeSeats, n, buttonSeat)}</span>
                       )}
                     </button>
                   );

@@ -141,7 +141,7 @@ export function ensureSeatCodes(session) {
   });
   for (const s of seats) {
     if (s.seatNum !== session.mySeat && s.status !== 'empty' && !s.code) {
-      s.code = nextPlayerCode(seats.map(x => x.code).filter(Boolean));
+      s.code = nextPlayerCode([...seats.map(x => x.code), ...(session.seatLog || []).map(e => e.code)].filter(Boolean));
     }
   }
   return { ...session, seats, seatLog: session.seatLog || [] };
@@ -173,7 +173,9 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
     }
     case 'seated': {
       const s = get(event.seat);
-      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', code: nextPlayerCode(seats.map(x => x.code).filter(Boolean)) });
+      // never reuse a code that anyone used earlier in this session
+      const used = [...seats.map(x => x.code), ...next.seatLog.map(e => e.code)].filter(Boolean);
+      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', code: nextPlayerCode(used) });
       log = { type: 'seated', seat: event.seat, code: s.code };
       break;
     }
