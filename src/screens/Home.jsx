@@ -42,11 +42,14 @@ export default function Home() {
     <div className="screen">
       <div className="screen-header">
         <h1>🃏 Poker Tracker</h1>
-        {sessions.length > 0 && (
-          <span className={net >= 0 ? 'result-won' : 'result-lost'} style={{ fontSize: '1rem' }}>
-            {formatMoney(net)}
-          </span>
-        )}
+        <div className="row gap-8">
+          {sessions.length > 0 && (
+            <span className={net >= 0 ? 'result-won' : 'result-lost'} style={{ fontSize: '1rem' }}>
+              {formatMoney(net)}
+            </span>
+          )}
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/backup')}>Backup</button>
+        </div>
       </div>
 
       {sessions.length === 0 ? (

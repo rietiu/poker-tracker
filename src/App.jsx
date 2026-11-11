@@ -7,6 +7,8 @@ import QuickHandEntry from './screens/QuickHandEntry';
 import HandDetail from './screens/HandDetail';
 import History from './screens/History';
 import Players from './screens/Players';
+import Backup from './screens/Backup';
+import UpdateBanner from './components/UpdateBanner';
 
 function HomeIcon() {
   return (
@@ -40,6 +42,7 @@ function PlayersIcon() {
 export default function App() {
   return (
     <BrowserRouter>
+      <UpdateBanner />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/session/new" element={<SessionSetup />} />
@@ -51,6 +54,7 @@ export default function App() {
         <Route path="/hand/:handId/edit" element={<HandRecorder />} />
         <Route path="/history" element={<History />} />
         <Route path="/players" element={<Players />} />
+        <Route path="/backup" element={<Backup />} />
       </Routes>
       <nav className="bottom-nav">
         <NavLink to="/" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')} end>

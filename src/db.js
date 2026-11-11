@@ -52,3 +52,30 @@ export async function getSessionsSorted() {
   const all = await db.getAll('sessions');
   return all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
+
+// ── Backup ──────────────────────────────────────────────────────────────────
+export async function exportAllData() {
+  const db = await dbPromise;
+  const [players, sessions, hands] = await Promise.all([
+    db.getAll('players'), db.getAll('sessions'), db.getAll('hands'),
+  ]);
+  return { players, sessions, hands };
+}
+
+export async function getAllIds() {
+  const db = await dbPromise;
+  const [players, sessions, hands] = await Promise.all([
+    db.getAllKeys('players'), db.getAllKeys('sessions'), db.getAllKeys('hands'),
+  ]);
+  return { players, sessions, hands };
+}
+
+// Upsert every record from a validated backup in one transaction (all or nothing).
+export async function importBackup(backup) {
+  const db = await dbPromise;
+  const tx = db.transaction(['players', 'sessions', 'hands'], 'readwrite');
+  for (const store of ['players', 'sessions', 'hands']) {
+    for (const rec of backup[store]) tx.objectStore(store).put(rec);
+  }
+  await tx.done;
+}
