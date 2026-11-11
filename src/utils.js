@@ -102,16 +102,62 @@ export const POSTFLOP_ACTION_ORDER = {
   9: ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'],
 };
 
+// Blinds from a game label in any currency: "NL $1/$2", "PLO ₱25/₱50",
+// "NL ₫50,000/₫100,000", "NL RM5/RM10", "NL S$2/S$4" (commas = thousands).
+function parseBlinds(gameStr) {
+  const m = gameStr?.match(/(\d[\d,]*(?:\.\d+)?)\s*\/\s*\D*?(\d[\d,]*(?:\.\d+)?)/);
+  if (!m) return null;
+  const num = (x) => parseFloat(x.replace(/,/g, ''));
+  return { sb: num(m[1]), bb: num(m[2]) };
+}
+
 export function parseBB(gameStr) {
-  // "NL $1/$2" → 2,  "NL P50/P100" → 100,  "PLO ₱25/₱50" → 50
-  const m = gameStr?.match(/[₱$P£€]?([\d.]+)\s*\/\s*[₱$P£€]?([\d.]+)/);
-  return m ? parseFloat(m[2]) : 2;
+  return parseBlinds(gameStr)?.bb ?? 2;
 }
 
 export function parseSB(gameStr) {
-  // "NL $1/$2" → 1,  "NL $2/$5" → 2,  "PLO ₱25/₱50" → 25
-  const m = gameStr?.match(/[₱$P£€]?([\d.]+)\s*\/\s*[₱$P£€]?([\d.]+)/);
-  return m ? parseFloat(m[1]) : 1;
+  return parseBlinds(gameStr)?.sb ?? 1;
+}
+
+// ── Currencies ────────────────────────────────────────────────────────────────
+// PHP + USD + common SE Asian poker currencies. EUR/GBP kept for old sessions.
+export const CURRENCIES = [
+  { code: 'PHP', symbol: '₱', name: 'Philippine peso' },
+  { code: 'USD', symbol: '$', name: 'US dollar' },
+  { code: 'THB', symbol: '฿', name: 'Thai baht' },
+  { code: 'VND', symbol: '₫', name: 'Vietnamese dong' },
+  { code: 'MYR', symbol: 'RM', name: 'Malaysian ringgit' },
+  { code: 'SGD', symbol: 'S$', name: 'Singapore dollar' },
+  { code: 'EUR', symbol: '€', name: 'Euro' },
+  { code: 'GBP', symbol: '£', name: 'British pound' },
+];
+
+export function currencySymbol(code) {
+  if (!code) return '$';
+  const c = CURRENCIES.find(x => x.code === code);
+  return c ? c.symbol : `${code} `;
+}
+
+// +₱1,200 / −$40
+export function formatSigned(amount, code) {
+  const n = Number(amount) || 0;
+  return `${n < 0 ? '−' : '+'}${currencySymbol(code)}${Math.abs(n).toLocaleString()}`;
+}
+
+// [{ currency, amount }] → { PHP: n, USD: m } — different currencies are never added together.
+export function sumByCurrency(entries) {
+  const out = {};
+  for (const { currency, amount } of entries || []) {
+    const code = currency || 'USD';
+    out[code] = (out[code] || 0) + (Number(amount) || 0);
+  }
+  return out;
+}
+
+export function formatTotals(totals) {
+  const codes = Object.keys(totals || {});
+  if (codes.length === 0) return '+0';
+  return codes.map(c => formatSigned(totals[c], c)).join(' · ');
 }
 
 export function getSbSeat(buttonSeat, totalSeats) {
