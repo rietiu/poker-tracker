@@ -1426,3 +1426,8 @@ h3 { font-size: 1rem; font-weight: 600; }
 }
 .seq-controls .btn { flex: 1 1 auto; min-height: 44px; }
 .seq-controls .seq-fold { color: var(--red-light); border-color: rgba(231,76,60,0.4); }
+.result-auto-won.result-folded-banner {
+  background: var(--bg3);
+  border-color: var(--border);
+  color: var(--text2);
+}
