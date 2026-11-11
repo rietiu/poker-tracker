@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum } from '../utils';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
 import PositionBadge from '../components/PositionBadge';
@@ -229,7 +229,7 @@ export default function HandRecorder() {
     // Create / resume mode — complete the draft and save as a proper hand record
     if (draftId) await del('hands', draftId);
     const prevHands = await getHandsBySession(sid);
-    const handNum = prevHands.filter(h => !h.incomplete).length + 1;
+    const handNum = nextHandNum(prevHands);
 
     const record = {
       id: uuid(),
@@ -670,7 +670,7 @@ export default function HandRecorder() {
             <div className="form-group">
               <label className="form-label">
                 {hand.result.outcome === 'won' ? 'Amount won' :
-                 hand.result.outcome === 'lost' ? 'Amount lost' : 'Amount'}
+                 hand.result.outcome === 'lost' ? 'Amount lost' : 'Your share of the pot'}
               </label>
               <input
                 type="number"

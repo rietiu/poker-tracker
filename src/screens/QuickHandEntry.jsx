@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put } from '../db';
-import { uuid, TABLE_POSITIONS } from '../utils';
+import { uuid, TABLE_POSITIONS, nextHandNum } from '../utils';
 import InlineCardPicker from '../components/InlineCardPicker';
 
 export default function QuickHandEntry() {
@@ -20,7 +20,7 @@ export default function QuickHandEntry() {
 
   async function saveHand() {
     const prevHands = await getHandsBySession(sessionId);
-    const handNum = prevHands.filter(h => !h.incomplete).length + 1;
+    const handNum = nextHandNum(prevHands);
 
     const record = {
       id: uuid(),

@@ -81,7 +81,7 @@ export const POSITION_COLORS = {
 
 export const TABLE_POSITIONS = {
   6: ['SB', 'BB', 'UTG', 'HJ', 'CO', 'BTN'],
-  8: ['SB', 'BB', 'UTG', 'UTG+1', 'HJ', 'CO', 'BTN'],
+  8: ['SB', 'BB', 'UTG', 'UTG+1', 'LJ', 'HJ', 'CO', 'BTN'],
   9: ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'],
 };
 
@@ -92,13 +92,13 @@ export const HISTORY_FILTER_POSITIONS = ['BTN', 'CO', 'HJ', 'LJ', 'MP', 'UTG+1',
 
 export const PREFLOP_ACTION_ORDER = {
   6: ['UTG', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
-  8: ['UTG', 'UTG+1', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
+  8: ['UTG', 'UTG+1', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
   9: ['UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
 };
 
 export const POSTFLOP_ACTION_ORDER = {
   6: ['SB', 'BB', 'UTG', 'HJ', 'CO', 'BTN'],
-  8: ['SB', 'BB', 'UTG', 'UTG+1', 'HJ', 'CO', 'BTN'],
+  8: ['SB', 'BB', 'UTG', 'UTG+1', 'LJ', 'HJ', 'CO', 'BTN'],
   9: ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'],
 };
 
@@ -145,7 +145,7 @@ export const TAG_META = {
 // Stored `result.amount` semantics are unchanged by these helpers:
 //   won   → gross net-pot (pot − rake), i.e. every chip pushed to hero
 //   lost  → chips the user typed as lost
-//   split → whatever the user typed (rare, usually blank)
+//   split → hero's share of the pot (gross), blank = got nothing back
 // handNet() converts that plus the recorded street actions into hero's real
 // signed profit/loss for the hand.
 
@@ -271,6 +271,7 @@ export function handNet(hand, opts = {}) {
     // Quick hands have no action lists — trust the typed amount as the net.
     if (r.outcome === 'won' || r.outcome === 'split') net = amt;
     else if (r.outcome === 'lost') net = -Math.abs(amt);
+    else if (r.outcome === 'folded') net = -heroBlindPosted(hand, sb, bb);
   } else {
     switch (r.outcome) {
       case 'won':
@@ -282,7 +283,8 @@ export function handNet(hand, opts = {}) {
         break;
       }
       case 'split':
-        net = amt !== 0 ? amt : -heroInvested(hand, sb, bb);
+        // typed amount = hero's share of the pot (gross), same meaning as won
+        net = amt - heroInvested(hand, sb, bb);
         break;
       case 'folded':
         net = -heroBlindPosted(hand, sb, bb);
@@ -299,4 +301,19 @@ export function sumNet(hands, opts = {}) {
   return (hands || [])
     .filter(h => !h.incomplete)
     .reduce((s, h) => s + handNet(h, opts), 0);
+}
+
+// A bet / raise-to amount is valid only if it is a positive number strictly
+// above the bet already facing the player (raise-to semantics).
+export function isValidBetAmount(amount, currentBet = 0) {
+  const n = Number(amount);
+  return Number.isFinite(n) && n > 0 && n > (Number(currentBet) || 0);
+}
+
+// Next hand number for a session: max existing number + 1 (drafts ignored),
+// so deleting a hand never makes the next one reuse a number.
+export function nextHandNum(hands) {
+  return (hands || [])
+    .filter(h => !h.incomplete)
+    .reduce((m, h) => Math.max(m, Number(h.handNum) || 0), 0) + 1;
 }

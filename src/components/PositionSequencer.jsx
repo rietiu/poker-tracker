@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState } from '../utils';
+import { PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState, isValidBetAmount } from '../utils';
 
 const POT_FRACS = [
   { label: '1/3', frac: 1 / 3 },
@@ -111,8 +111,11 @@ export default function PositionSequencer({
     setShowRaisePanel(v => !v);
     setPendingAmount('');
   }
+  const betAmountValid = isValidBetAmount(pendingAmount, currentBet);
+
   function commitBetRaise() {
-    const amt = Number(pendingAmount) || 0;
+    if (!betAmountValid) return;
+    const amt = Number(pendingAmount);
     const action = currentBet > 0 ? 'raise' : 'bet';
     commitAction(action, amt);
     setShowRaisePanel(false);
@@ -293,11 +296,18 @@ export default function PositionSequencer({
                 onChange={e => setPendingAmount(e.target.value)}
                 inputMode="numeric"
               />
+              {pendingAmount !== '' && !betAmountValid && (
+                <div className="text-xs mt-4 result-lost">
+                  {currentBet > 0
+                    ? `Raise must be more than ${sym}${currentBet.toLocaleString()}`
+                    : 'Bet must be more than 0'}
+                </div>
+              )}
               <button
                 className="btn btn-primary btn-full mt-8"
                 onClick={commitBetRaise}
-                disabled={!pendingAmount}
-                style={{ opacity: pendingAmount ? 1 : 0.5 }}
+                disabled={!betAmountValid}
+                style={{ opacity: betAmountValid ? 1 : 0.5 }}
               >
                 {currentBet > 0 ? 'Raise' : 'Bet'}
                 {pendingAmount ? ` ${sym}${Number(pendingAmount).toLocaleString()}` : ''}
