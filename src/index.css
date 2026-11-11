@@ -1538,3 +1538,7 @@ h3 { font-size: 1rem; font-weight: 600; }
   border-radius: var(--radius);
   background: rgba(45,106,79,0.12);
 }
+
+/* ── Button-seat picker (step 0) ───────────────────────────────────────────── */
+.seat-btn-labelled { flex-direction: column; gap: 2px; line-height: 1.1; }
+.seat-sub { font-size: 0.65rem; font-weight: 600; opacity: 0.85; min-height: 0.8rem; }

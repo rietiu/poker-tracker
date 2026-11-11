@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, calcPosition, buttonSeatFor } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
@@ -62,6 +62,14 @@ export default function HandRecorder() {
   const [pendingRakeMax, setPendingRakeMax] = useState('');
   const [pendingJackpot, setPendingJackpot] = useState('');
   const [relocatedNote, setRelocatedNote] = useState('');
+  // Pick my position by name, or by where the dealer button is (remembered per device).
+  const [posMode, setPosMode] = useState(() => {
+    try { return localStorage.getItem('poker-tracker:posMode') || 'position'; } catch { return 'position'; }
+  });
+  function choosePosMode(mode) {
+    setPosMode(mode);
+    try { localStorage.setItem('poker-tracker:posMode', mode); } catch { /* storage unavailable */ }
+  }
   const [prevPreflopActions, setPrevPreflopActions] = useState(null);
 
   useEffect(() => {
@@ -485,20 +493,50 @@ export default function HandRecorder() {
       {/* Step 0: My Position */}
       {step === 0 && (
         <div>
-          <div className="form-group">
-            <label className="form-label">My Position</label>
-            <div className="quick-pos-grid">
-              {tablePositions.map(pos => (
-                <button
-                  key={pos}
-                  className={'quick-pos-btn' + (hand.myPosition === pos ? ' selected' : '')}
-                  onClick={() => changePosition(pos)}
-                >
-                  {pos}
-                </button>
-              ))}
-            </div>
+          <div className="pill-group mb-12">
+            <button className={'pill' + (posMode === 'position' ? ' selected' : '')} onClick={() => choosePosMode('position')}>Position</button>
+            <button className={'pill' + (posMode === 'button' ? ' selected' : '')} onClick={() => choosePosMode('button')}>Button seat</button>
           </div>
+
+          {posMode === 'position' ? (
+            <div className="form-group">
+              <label className="form-label">My Position</label>
+              <div className="quick-pos-grid">
+                {tablePositions.map(pos => (
+                  <button
+                    key={pos}
+                    className={'quick-pos-btn' + (hand.myPosition === pos ? ' selected' : '')}
+                    onClick={() => changePosition(pos)}
+                  >
+                    {pos}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (() => {
+            const mySeat = session.mySeat || 1;
+            const btnSeat = buttonSeatFor(totalSeats, mySeat, hand.myPosition);
+            return (
+              <div className="form-group">
+                <label className="form-label">Which seat has the dealer button? <span className="text-muted text-xs">(you're in seat {mySeat})</span></label>
+                <div className="seat-grid">
+                  {Array.from({ length: totalSeats }, (_, i) => i + 1).map(n => (
+                    <button
+                      key={n}
+                      className={'seat-btn seat-btn-labelled' + (n === btnSeat ? ' is-btn' : n === mySeat ? ' is-me' : '')}
+                      onClick={() => changePosition(calcPosition(totalSeats, mySeat, n))}
+                    >
+                      <span>{n}</span>
+                      <span className="seat-sub">
+                        {n === btnSeat ? 'D' : n === mySeat ? 'You' : ''}
+                        {btnSeat && n !== btnSeat ? `${n === mySeat ? ' · ' : ''}${calcPosition(totalSeats, n, btnSeat)}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {relocatedNote && <div className="relocated-note text-sm mb-12">{relocatedNote}</div>}
           {hand.myPosition && (
