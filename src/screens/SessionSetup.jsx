@@ -1,10 +1,51 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { put, getSessionsSorted } from '../db';
-import { uuid, CURRENCIES, currencySymbol } from '../utils';
+import { uuid, CURRENCIES, currencySymbol, recentValues } from '../utils';
 import { rakeProfileFor } from '../pots';
 
 const SEAT_COUNTS = [6, 8, 9];
+
+// Past values as tap-to-pick chips; "+ New" (or no history yet) shows a text box.
+function OptionPicker({ options, value, onChange, placeholder }) {
+  const norm = (v) => (v || '').trim().toLowerCase();
+  const [typing, setTyping] = useState(false);
+  const inOptions = options.some(o => norm(o) === norm(value));
+  const showInput = options.length === 0 || typing || (!!value && !inOptions);
+  return (
+    <div>
+      {options.length > 0 && (
+        <div className="pill-group mb-8">
+          {options.map(o => (
+            <button
+              key={o}
+              className={'pill' + (norm(o) === norm(value) && !typing ? ' selected' : '')}
+              onClick={() => { setTyping(false); onChange(o); }}
+            >
+              {o}
+            </button>
+          ))}
+          <button
+            className={'pill' + (showInput ? ' selected' : '')}
+            onClick={() => { setTyping(true); onChange(''); }}
+          >
+            + New
+          </button>
+        </div>
+      )}
+      {showInput && (
+        <input
+          type="text"
+          className="form-input"
+          placeholder={placeholder}
+          value={value}
+          autoFocus={typing}
+          onChange={e => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
 
 export default function SessionSetup() {
   const navigate = useNavigate();
@@ -53,6 +94,26 @@ export default function SessionSetup() {
       setRakeSource('');
     }
   }
+  // Options come from past sessions: venues anywhere, stakes in the chosen currency.
+  const venueOptions = recentValues(allSessions, 'venue');
+  const gameOptions = recentValues(allSessions, 'game', x => (x.currency || 'USD') === currency);
+  const usedCurrencies = recentValues(allSessions, 'currency');
+  const currencyOrder = [
+    ...usedCurrencies.map(code => CURRENCIES.find(c => c.code === code)).filter(Boolean),
+    ...CURRENCIES.filter(c => !usedCurrencies.includes(c.code)),
+  ];
+
+  function pickCurrency(code) {
+    setCurrency(code);
+    // Keep the stakes only if they belong to this currency; else offer that currency's last stakes.
+    const forCurrency = recentValues(allSessions, 'game', x => (x.currency || 'USD') === code);
+    if (!forCurrency.some(g => g.trim().toLowerCase() === game.trim().toLowerCase())) {
+      const next = forCurrency[0] || '';
+      setGame(next);
+      autoFillRake(venue, next);
+    }
+  }
+
   const editRake = (setter) => (e) => { setter(e.target.value); setRakeEdited(true); setRakeSource(''); };
 
   function applyPreset(s) {
@@ -121,41 +182,39 @@ export default function SessionSetup() {
       )}
 
       <div className="form-group">
-        <label className="form-label">Venue (optional)</label>
-        <input
-          type="text"
-          className="form-input"
-          placeholder="e.g. Resorts World"
-          value={venue}
-          onChange={e => { setVenue(e.target.value); autoFillRake(e.target.value, game); }}
-        />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">Game / Blinds</label>
-        <input
-          type="text"
-          className="form-input"
-          placeholder={`e.g. NL ${currencySymbol(currency)}25/${currencySymbol(currency)}50`}
-          value={game}
-          onChange={e => { setGame(e.target.value); autoFillRake(venue, e.target.value); }}
-        />
-      </div>
-
-      <div className="form-group">
         <label className="form-label">Currency</label>
         <div className="pill-group">
-          {CURRENCIES.map(c => (
+          {currencyOrder.map(c => (
             <button
               key={c.code}
               className={'pill' + (currency === c.code ? ' selected' : '')}
-              onClick={() => setCurrency(c.code)}
+              onClick={() => pickCurrency(c.code)}
               title={c.name}
             >
               {c.symbol} {c.code}
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Venue (optional)</label>
+        <OptionPicker
+          options={venueOptions}
+          value={venue}
+          placeholder="e.g. Okada Manila"
+          onChange={v => { setVenue(v); autoFillRake(v, game); }}
+        />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Game / Blinds</label>
+        <OptionPicker
+          options={gameOptions}
+          value={game}
+          placeholder={`e.g. NL ${currencySymbol(currency)}25/${currencySymbol(currency)}50`}
+          onChange={g => { setGame(g); autoFillRake(venue, g); }}
+        />
       </div>
 
       <div className="form-group">
