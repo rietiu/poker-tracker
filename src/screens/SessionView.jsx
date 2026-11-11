@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, put, del, getHandsBySession } from '../db';
-import { isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned } from '../utils';
+import { isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector } from '../components/PlayerTag';
 
@@ -299,7 +299,7 @@ export default function SessionView() {
         <button className="back-btn" onClick={() => navigate('/')}>← Back</button>
         <div style={{ flex: 1 }}>
           <h1>{session.venue || 'Unnamed venue'}</h1>
-          <div className="text-muted text-sm">{session.game} · {session.totalSeats}-handed</div>
+          <div className="text-muted text-sm">{formatGame(session.game, session.currency)} · {session.totalSeats}-handed</div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className={netResult >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(netResult, session.currency)}</div>

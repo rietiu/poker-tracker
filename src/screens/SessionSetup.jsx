@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { put, getSessionsSorted } from '../db';
-import { uuid, CURRENCIES, currencySymbol, recentValues } from '../utils';
+import { uuid, CURRENCIES, currencySymbol, recentValues, recentGames, buildGame, formatGame } from '../utils';
 import { rakeProfileFor } from '../pots';
 
 const SEAT_COUNTS = [6, 8, 9];
@@ -50,7 +50,9 @@ function OptionPicker({ options, value, onChange, placeholder }) {
 export default function SessionSetup() {
   const navigate = useNavigate();
   const [venue, setVenue] = useState('');
-  const [game, setGame] = useState('NL ₱25/₱50');
+  const [game, setGame] = useState('');                 // a picked blind level (formatted)
+  const [enteringNew, setEnteringNew] = useState(false); // "+ New" level: two blind boxes
+  const [newBlinds, setNewBlinds] = useState({ type: 'NL', sb: '', bb: '', bbAuto: true });
   const [currency, setCurrency] = useState('PHP');
   const [totalSeats, setTotalSeats] = useState(6);
   const [mySeat, setMySeat] = useState(1);
@@ -70,7 +72,7 @@ export default function SessionSetup() {
       // Start from whatever was played last (currency + stakes); first time → pesos.
       if (all[0]) {
         if (all[0].currency) setCurrency(all[0].currency);
-        if (all[0].game) setGame(all[0].game);
+        if (all[0].game) setGame(formatGame(all[0].game, all[0].currency || 'USD'));
       }
     });
   }, []);
@@ -96,7 +98,19 @@ export default function SessionSetup() {
   }
   // Options come from past sessions: venues anywhere, stakes in the chosen currency.
   const venueOptions = recentValues(allSessions, 'venue');
-  const gameOptions = recentValues(allSessions, 'game', x => (x.currency || 'USD') === currency);
+  const gameOptions = recentGames(allSessions, currency);
+  const showNewBlinds = enteringNew || gameOptions.length === 0;
+  const blindsFor = (b, code) => buildGame(b.type, b.sb, b.bb, code);
+  // What gets saved: the picked level, or the two boxes formatted with the chosen currency symbol.
+  const effectiveGame = showNewBlinds ? blindsFor(newBlinds, currency) : game;
+
+  function updateNewBlinds(patch) {
+    const next = { ...newBlinds, ...patch };
+    if ('sb' in patch && next.bbAuto) next.bb = patch.sb === '' ? '' : String(Number(patch.sb) * 2);
+    if ('bb' in patch) next.bbAuto = false;
+    setNewBlinds(next);
+    autoFillRake(venue, blindsFor(next, currency));
+  }
   const usedCurrencies = recentValues(allSessions, 'currency');
   const currencyOrder = [
     ...usedCurrencies.map(code => CURRENCIES.find(c => c.code === code)).filter(Boolean),
@@ -106,11 +120,12 @@ export default function SessionSetup() {
   function pickCurrency(code) {
     setCurrency(code);
     // Keep the stakes only if they belong to this currency; else offer that currency's last stakes.
-    const forCurrency = recentValues(allSessions, 'game', x => (x.currency || 'USD') === code);
-    if (!forCurrency.some(g => g.trim().toLowerCase() === game.trim().toLowerCase())) {
+    if (enteringNew) { autoFillRake(venue, blindsFor(newBlinds, code)); return; }
+    const forCurrency = recentGames(allSessions, code);
+    if (!forCurrency.includes(game)) {
       const next = forCurrency[0] || '';
       setGame(next);
-      autoFillRake(venue, next);
+      autoFillRake(venue, next || blindsFor(newBlinds, code));
     }
   }
 
@@ -118,7 +133,8 @@ export default function SessionSetup() {
 
   function applyPreset(s) {
     if (s.venue) setVenue(s.venue);
-    if (s.game) setGame(s.game);
+    if (s.game) setGame(formatGame(s.game, s.currency || 'USD'));
+    setEnteringNew(false);
     if (s.currency) setCurrency(s.currency);
     if (s.totalSeats) setTotalSeats(s.totalSeats);
     applyRakeProfile({ rakeType: s.rakeType || 'percent', rake: s.rake, rakeMax: s.rakeMax || 0, jackpot: s.jackpot || 0 });
@@ -139,7 +155,7 @@ export default function SessionSetup() {
       id: uuid(),
       date: new Date().toISOString(),
       venue: venue.trim(),
-      game: game.trim(),
+      game: effectiveGame,
       currency,
       totalSeats,
       rakeType,
@@ -174,7 +190,7 @@ export default function SessionSetup() {
                 onClick={() => applyPreset(s)}
               >
                 <div className="preset-venue">{s.venue || 'Unnamed'}</div>
-                <div className="preset-meta">{s.game} · {s.totalSeats}-max</div>
+                <div className="preset-meta">{formatGame(s.game, s.currency || 'USD')} · {s.totalSeats}-max</div>
               </button>
             ))}
           </div>
@@ -203,18 +219,76 @@ export default function SessionSetup() {
           options={venueOptions}
           value={venue}
           placeholder="e.g. Okada Manila"
-          onChange={v => { setVenue(v); autoFillRake(v, game); }}
+          onChange={v => { setVenue(v); autoFillRake(v, effectiveGame); }}
         />
       </div>
 
       <div className="form-group">
         <label className="form-label">Game / Blinds</label>
-        <OptionPicker
-          options={gameOptions}
-          value={game}
-          placeholder={`e.g. NL ${currencySymbol(currency)}25/${currencySymbol(currency)}50`}
-          onChange={g => { setGame(g); autoFillRake(venue, g); }}
-        />
+        {gameOptions.length > 0 && (
+          <div className="pill-group mb-8">
+            {gameOptions.map(g => (
+              <button
+                key={g}
+                className={'pill' + (!showNewBlinds && game === g ? ' selected' : '')}
+                onClick={() => { setEnteringNew(false); setGame(g); autoFillRake(venue, g); }}
+              >
+                {g}
+              </button>
+            ))}
+            <button
+              className={'pill' + (showNewBlinds ? ' selected' : '')}
+              onClick={() => { setEnteringNew(true); autoFillRake(venue, blindsFor(newBlinds, currency)); }}
+            >
+              + New
+            </button>
+          </div>
+        )}
+        {showNewBlinds && (
+          <div className="blind-new">
+            <div className="pill-group mb-8">
+              {['NL', 'PLO'].map(t => (
+                <button key={t} className={'pill' + (newBlinds.type === t ? ' selected' : '')} onClick={() => updateNewBlinds({ type: t })}>
+                  {t}
+                </button>
+              ))}
+            </div>
+            <div className="blind-inputs">
+              <label className="blind-box">
+                <span className="blind-label">Small blind</span>
+                <span className="blind-field">
+                  <span className="blind-sym">{currencySymbol(currency)}</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    className="form-input"
+                    placeholder="25"
+                    value={newBlinds.sb}
+                    onChange={e => updateNewBlinds({ sb: e.target.value })}
+                  />
+                </span>
+              </label>
+              <span className="blind-slash">/</span>
+              <label className="blind-box">
+                <span className="blind-label">Big blind</span>
+                <span className="blind-field">
+                  <span className="blind-sym">{currencySymbol(currency)}</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    className="form-input"
+                    placeholder="50"
+                    value={newBlinds.bb}
+                    onChange={e => updateNewBlinds({ bb: e.target.value })}
+                  />
+                </span>
+              </label>
+            </div>
+            <div className="text-muted text-xs mt-4">
+              {effectiveGame ? `Saved as ${effectiveGame}` : 'Enter both blinds'}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="form-group">
@@ -306,7 +380,7 @@ export default function SessionSetup() {
       </div>
 
       <div style={{ paddingBottom: 24 }}>
-        <button className="btn btn-primary btn-full" onClick={handleStart}>
+        <button className="btn btn-primary btn-full" onClick={handleStart} disabled={!effectiveGame} style={{ opacity: effectiveGame ? 1 : 0.5 }}>
           Start Session
         </button>
       </div>

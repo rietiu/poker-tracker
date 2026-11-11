@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllHandsSorted, getSessionsSorted } from '../db';
-import { isRedCard, handNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB, currencySymbol, formatSigned, sumByCurrency } from '../utils';
+import { isRedCard, handNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB, currencySymbol, formatSigned, sumByCurrency, formatGame } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
 function CardBadge({ card }) {
@@ -50,7 +50,7 @@ export default function History() {
 
   function sessionLabel(sid) {
     const s = sessions.find(s => s.id === sid);
-    return s ? `${s.venue || 'Unnamed'} ${s.game}` : sid;
+    return s ? `${s.venue || 'Unnamed'} ${formatGame(s.game, s.currency)}` : sid;
   }
 
   function resultText(hand) {

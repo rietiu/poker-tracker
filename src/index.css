@@ -1503,3 +1503,15 @@ h3 { font-size: 1rem; font-weight: 600; }
   color: var(--accent);
 }
 .street-banner small { font-size: 0.8rem; font-weight: 500; letter-spacing: 0; color: var(--text2); }
+
+/* ── New blind level: two boxes, currency symbol added automatically ────────── */
+.blind-inputs { display: flex; align-items: flex-end; gap: 8px; }
+.blind-box { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.blind-label { font-size: 0.75rem; color: var(--text2); }
+.blind-field { position: relative; display: block; }
+.blind-sym {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--text2); font-weight: 600; pointer-events: none;
+}
+.blind-field .form-input { padding-left: 46px; width: 100%; }
+.blind-slash { padding-bottom: 12px; color: var(--text2); font-size: 1.2rem; }

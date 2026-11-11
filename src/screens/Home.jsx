@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSessionsSorted, getHandsBySession } from '../db';
-import { sumNet, parseBB, parseSB, formatSigned, sumByCurrency } from '../utils';
+import { sumNet, parseBB, parseSB, formatSigned, sumByCurrency, formatGame } from '../utils';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -75,7 +75,7 @@ export default function Home() {
               <div className="row-between">
                 <div>
                   <div style={{ fontWeight: 600 }}>{s.venue || 'Unnamed venue'}</div>
-                  <div className="text-muted text-sm">{s.game} · {fmtDate(s.date)}</div>
+                  <div className="text-muted text-sm">{formatGame(s.game, s.currency)} · {fmtDate(s.date)}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(n, s.currency)}</div>

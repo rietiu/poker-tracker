@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, del } from '../db';
-import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB, currencySymbol } from '../utils';
+import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB, currencySymbol, formatGame } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
 
@@ -31,8 +31,8 @@ function generateHandText(hand, session, lang) {
   // Header
   const venue = session?.venue ? (zh ? `【${session.venue}】` : ` @ ${session.venue}`) : '';
   lines.push(zh
-    ? `手牌 #${hand.handNum}${venue} — ${session?.game || ''}`
-    : `Hand #${hand.handNum}${venue} — ${session?.game || ''}`
+    ? `手牌 #${hand.handNum}${venue} — ${formatGame(session?.game, session?.currency)}`
+    : `Hand #${hand.handNum}${venue} — ${formatGame(session?.game, session?.currency)}`
   );
   lines.push(zh
     ? `位置：${posLabel(myPos)}　手牌：${cards(hand.holeCards)}`
@@ -286,7 +286,7 @@ export default function HandDetail() {
       <div className="card mb-16">
         <div className="row gap-8 mb-8">
           <PositionBadge position={hand.myPosition} />
-          {session && <span className="text-muted text-sm">{session.venue || session.game}</span>}
+          {session && <span className="text-muted text-sm">{session.venue || formatGame(session.game, session.currency)}</span>}
         </div>
         <div className="row gap-8">
           {hand.holeCards?.map((c, i) => <CardBadge key={i} card={c} large />)}
