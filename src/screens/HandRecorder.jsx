@@ -59,6 +59,7 @@ export default function HandRecorder() {
   const [pendingRake, setPendingRake] = useState('');
   const [pendingRakeType, setPendingRakeType] = useState('percent');
   const [pendingRakeMax, setPendingRakeMax] = useState('');
+  const [prevPreflopActions, setPrevPreflopActions] = useState(null);
 
   useEffect(() => {
     async function init() {
@@ -128,6 +129,13 @@ export default function HandRecorder() {
         // ── New hand — always a fresh draft ───────────────────────────────────
         setDraftId(uuid());
       }
+
+      // Previous full hand's pre-flop, for the "Same as last hand" shortcut
+      const sessionHands = await getHandsBySession(sid);
+      const prev = sessionHands
+        .filter(h => !h.incomplete && !h.quick && h.id !== handId && h.preflop?.actions?.length)
+        .sort((a, b) => (b.handNum || 0) - (a.handNum || 0))[0];
+      setPrevPreflopActions(prev?.preflop?.actions || null);
 
       const s = await get('sessions', sid);
       setSession(s);
@@ -324,6 +332,25 @@ export default function HandRecorder() {
 
   const rakeConfigured = session?.rake != null;
 
+  // A street finished (Done / auto-close / hero folded). Decide the next step
+  // from the actions just produced — React state may not have caught up yet.
+  const STREET_STEP = { preflop: 2, flop: 3, turn: 4, river: 5 };
+  function afterStreet(street, streetActions, livePositions) {
+    const heroFoldedNow = (streetActions || []).some(a => a.pos === hand.myPosition && a.action === 'fold');
+    if (heroFoldedNow) {
+      setHand(prev => ({ ...prev, result: { ...prev.result, outcome: 'folded', amount: '', winner: '' } }));
+      setStep(6);
+      return;
+    }
+    const folded = getFoldedPositions(streetActions);
+    const remaining = livePositions.filter(p => !folded.has(p));
+    if (street === 'river' || remaining.length <= 1) setStep(6);
+    else setStep(STREET_STEP[street] + 1);
+  }
+
+  const heroFolded = ['preflop', 'flop', 'turn', 'river']
+    .some(st => (hand[st]?.actions || []).some(a => a.pos === hand.myPosition && a.action === 'fold'));
+
   function canAdvance() {
     if (step === 0) return !!hand.myPosition;
     if (step === 1) return !!(hand.holeCards[0] && hand.holeCards[1]);
@@ -334,6 +361,10 @@ export default function HandRecorder() {
   // Auto-fill result when arriving at step 6 — MUST be before early return
   useEffect(() => {
     if (step !== 6 || !session || hand.result.outcome) return;
+    if (heroFolded) {
+      patchHand({ result: { ...hand.result, outcome: 'folded', amount: '', winner: '' } });
+      return;
+    }
     if (finalRemaining.length <= 1 && finalRemaining.includes(hand.myPosition)) {
       patchHand({ result: { ...hand.result, outcome: 'won', amount: String(netPot), winner: hand.myPosition } });
     }
@@ -435,7 +466,8 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
-            onComplete={() => flopActivePositions.length <= 1 ? setStep(6) : setStep(3)}
+            onComplete={acts => afterStreet('preflop', acts, tablePositions)}
+            prevPreflopActions={prevPreflopActions}
           />
 
           <div className="form-group">
@@ -475,7 +507,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
-            onComplete={() => turnActivePositions.length <= 1 ? setStep(6) : setStep(4)}
+            onComplete={acts => afterStreet('flop', acts, flopActivePositions)}
           />
 
           <div className="form-group">
@@ -514,7 +546,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
-            onComplete={() => riverActivePositions.length <= 1 ? setStep(6) : setStep(5)}
+            onComplete={acts => afterStreet('turn', acts, turnActivePositions)}
           />
 
           <div className="form-group">
@@ -553,7 +585,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
-            onComplete={() => setStep(6)}
+            onComplete={acts => afterStreet('river', acts, riverActivePositions)}
           />
 
           <div className="form-group">
@@ -627,11 +659,14 @@ export default function HandRecorder() {
           )}
 
           {/* Who won? */}
-          {finalRemaining.length <= 1 && finalRemaining.includes(hand.myPosition) ? (
+          {heroFolded && (
+            <div className="result-auto-won result-folded-banner">You folded</div>
+          )}
+          {!heroFolded && finalRemaining.length <= 1 && finalRemaining.includes(hand.myPosition) ? (
             <div className="result-auto-won">You win — everyone else folded</div>
           ) : (
             <div className="form-group">
-              <label className="form-label">Who won?</label>
+              <label className="form-label">{heroFolded ? 'Who won? (optional)' : 'Who won?'}</label>
               <div className="action-row" style={{ flexWrap: 'wrap' }}>
                 {finalRemaining.map(pos => (
                   <button
@@ -643,6 +678,10 @@ export default function HandRecorder() {
                         : '')
                     }
                     onClick={() => {
+                      if (heroFolded) {
+                        patchHand({ result: { ...hand.result, outcome: 'folded', winner: pos, amount: '' } });
+                        return;
+                      }
                       const iWon = pos === hand.myPosition;
                       patchHand({ result: {
                         ...hand.result,
@@ -655,12 +694,22 @@ export default function HandRecorder() {
                     {pos === hand.myPosition ? 'Me' : pos}
                   </button>
                 ))}
-                <button
-                  className={'action-btn' + (hand.result.outcome === 'split' ? ' selected' : '')}
-                  onClick={() => patchHand({ result: { ...hand.result, outcome: 'split', winner: '' } })}
-                >
-                  Split
-                </button>
+                {!heroFolded && (
+                  <button
+                    className={'action-btn' + (hand.result.outcome === 'split' ? ' selected' : '')}
+                    onClick={() => patchHand({ result: { ...hand.result, outcome: 'split', winner: '' } })}
+                  >
+                    Split
+                  </button>
+                )}
+                {!heroFolded && (
+                  <button
+                    className={'action-btn' + (hand.result.outcome === 'folded' ? ' selected fold' : '')}
+                    onClick={() => patchHand({ result: { ...hand.result, outcome: 'folded', winner: '', amount: '' } })}
+                  >
+                    I folded
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -668,6 +717,7 @@ export default function HandRecorder() {
           {/* Amount */}
           {hand.result.outcome && (
             <div className="form-group">
+              {hand.result.outcome !== 'folded' && (<>
               <label className="form-label">
                 {hand.result.outcome === 'won' ? 'Amount won' :
                  hand.result.outcome === 'lost' ? 'Amount lost' : 'Your share of the pot'}
@@ -680,12 +730,13 @@ export default function HandRecorder() {
                 onChange={e => patchHand({ result: { ...hand.result, amount: e.target.value } })}
                 inputMode="numeric"
               />
+              </>)}
               {hand.result.outcome === 'won' && effectiveRake > 0 && (
                 <div className="text-muted text-xs mt-4">
                   Pot {sym}{totalHandPot.toLocaleString()} − rake {sym}{effectiveRake.toLocaleString()} = {sym}{netPot.toLocaleString()}
                 </div>
               )}
-              {hand.result.outcome && hand.result.outcome !== 'folded' && (() => {
+              {hand.result.outcome && (() => {
                 const handForNet = {
                   myPosition: hand.myPosition,
                   quick: false,
