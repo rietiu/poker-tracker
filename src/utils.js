@@ -33,37 +33,7 @@ export function formatMoney(amount) {
 // Returns position string: 'BTN'|'SB'|'BB'|'EP'|'MP'|'HJ'|'CO'
 export function calcPosition(totalSeats, mySeat, buttonSeat) {
   if (!mySeat || !buttonSeat || !totalSeats) return '';
-
-  // offset from button (0 = BTN, 1 = SB, 2 = BB, ...)
-  const offset = ((mySeat - buttonSeat + totalSeats) % totalSeats);
-
-  if (offset === 0) return 'BTN';
-  if (offset === 1) return 'SB';
-  if (offset === 2) return 'BB';
-
-  // Remaining positions depend on table size
-  // Positions counted from BTN going left: BTN=0, SB=1, BB=2, ...EP last
-  // For 6-max: BTN CO HJ MP EP SB BB  → 5 non-blind non-btn = CO(5) HJ(4) MP(3) EP(?)
-  // Map offset to position name
-  // Names match TABLE_POSITIONS so History filters / badges line up.
-  if (totalSeats === 6) {
-    // offsets: 0=BTN,1=SB,2=BB,3=UTG,4=HJ,5=CO
-    const map = { 3: 'UTG', 4: 'HJ', 5: 'CO' };
-    return map[offset] || 'MP';
-  }
-  if (totalSeats === 8) {
-    // 0=BTN,1=SB,2=BB,3=UTG,4=UTG+1,5=LJ,6=HJ,7=CO
-    const map = { 3: 'UTG', 4: 'UTG+1', 5: 'LJ', 6: 'HJ', 7: 'CO' };
-    return map[offset] || 'MP';
-  }
-  if (totalSeats === 9) {
-    // 0=BTN,1=SB,2=BB,3=UTG,4=UTG+1,5=MP,6=LJ,7=HJ,8=CO
-    const map = { 3: 'UTG', 4: 'UTG+1', 5: 'MP', 6: 'LJ', 7: 'HJ', 8: 'CO' };
-    return map[offset] || 'MP';
-  }
-  // fallback
-  const positions = ['BTN', 'SB', 'BB', 'UTG', 'MP', 'HJ', 'CO'];
-  return positions[Math.min(offset, positions.length - 1)];
+  return positionAmong(Array.from({ length: totalSeats }, (_, i) => i + 1), mySeat, buttonSeat);
 }
 
 // Inverse of calcPosition: which seat holds the dealer button when I sit in
@@ -89,28 +59,82 @@ export const POSITION_COLORS = {
   'UTG+1': '#868e96',
 };
 
-export const TABLE_POSITIONS = {
-  6: ['SB', 'BB', 'UTG', 'HJ', 'CO', 'BTN'],
-  8: ['SB', 'BB', 'UTG', 'UTG+1', 'LJ', 'HJ', 'CO', 'BTN'],
-  9: ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'],
+// ── Positions for 2–9 players ─────────────────────────────────────────────────
+// Non-blind, non-button positions from earliest to latest, by players dealt in.
+const MIDDLE_POSITIONS = {
+  2: [], 3: [], 4: ['CO'], 5: ['UTG', 'CO'], 6: ['UTG', 'HJ', 'CO'],
+  7: ['UTG', 'LJ', 'HJ', 'CO'], 8: ['UTG', 'UTG+1', 'LJ', 'HJ', 'CO'],
+  9: ['UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO'],
 };
+const byCount = (fn) => Object.fromEntries(Object.keys(MIDDLE_POSITIONS).map(n => [n, fn(Number(n), MIDDLE_POSITIONS[n])]));
+
+// Heads-up: the button posts the small blind (named SB), acts first pre-flop, last after.
+export const TABLE_POSITIONS = byCount((n, mid) => (n === 2 ? ['SB', 'BB'] : ['SB', 'BB', ...mid, 'BTN']));
+export const PREFLOP_ACTION_ORDER = byCount((n, mid) => (n === 2 ? ['SB', 'BB'] : [...mid, 'BTN', 'SB', 'BB']));
+export const POSTFLOP_ACTION_ORDER = byCount((n, mid) => (n === 2 ? ['BB', 'SB'] : ['SB', 'BB', ...mid, 'BTN']));
+// Clockwise from the button: offset 0 = button.
+const RING_FROM_BUTTON = byCount((n, mid) => (n === 2 ? ['SB', 'BB'] : ['BTN', 'SB', 'BB', ...mid]));
 
 // Every distinct position across table sizes, ordered late -> early then blinds.
 // History's position filter uses this so UTG / LJ / UTG+1 hands are filterable
 // (the old hard-coded list used EP/MP names that no recorded hand ever has).
 export const HISTORY_FILTER_POSITIONS = ['BTN', 'CO', 'HJ', 'LJ', 'MP', 'UTG+1', 'UTG', 'SB', 'BB'];
 
-export const PREFLOP_ACTION_ORDER = {
-  6: ['UTG', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
-  8: ['UTG', 'UTG+1', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
-  9: ['UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'],
-};
+// ── Seats ─────────────────────────────────────────────────────────────────────
+// Position of `mySeat` when the button is on `buttonSeat`, counting only the
+// seats dealt in (away / empty seats are skipped). '' if it can't be worked out.
+export function positionAmong(activeSeats, mySeat, buttonSeat) {
+  const ring = [...new Set(activeSeats || [])].sort((a, b) => a - b);
+  const n = ring.length;
+  const me = ring.indexOf(mySeat), btn = ring.indexOf(buttonSeat);
+  if (n < 2 || n > 9 || me === -1 || btn === -1) return '';
+  return RING_FROM_BUTTON[n][(me - btn + n) % n];
+}
 
-export const POSTFLOP_ACTION_ORDER = {
-  6: ['SB', 'BB', 'UTG', 'HJ', 'CO', 'BTN'],
-  8: ['SB', 'BB', 'UTG', 'UTG+1', 'LJ', 'HJ', 'CO', 'BTN'],
-  9: ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'],
-};
+export function buttonSeatAmong(activeSeats, mySeat, position) {
+  if (!position) return null;
+  for (const btn of activeSeats || []) {
+    if (positionAmong(activeSeats, mySeat, btn) === position) return btn;
+  }
+  return null;
+}
+
+// Seat statuses: 'active' (someone sitting), 'away' (bathroom, meal…), 'empty'.
+// Older sessions used 'left' for a seat nobody is in.
+export const SEAT_OUT = ['away', 'empty', 'left'];
+export function activeSeatNums(session) {
+  const total = session?.totalSeats || 9;
+  const seats = session?.seats || [];
+  const out = [];
+  for (let n = 1; n <= total; n++) {
+    const s = seats.find(x => x.seatNum === n);
+    if (n === session?.mySeat || !SEAT_OUT.includes(s?.status)) out.push(n);
+  }
+  return out;
+}
+
+// Who sat where, and in which position, for one hand.
+export function seatingAtHand(seats, activeSeats, mySeat, buttonSeat) {
+  return [...activeSeats].sort((a, b) => a - b).map(n => {
+    const s = (seats || []).find(x => x.seatNum === n) || {};
+    return {
+      seat: n,
+      position: positionAmong(activeSeats, n, buttonSeat),
+      code: n === mySeat ? 'ME' : (s.code || ''),
+      name: n === mySeat ? 'Me' : (s.name || ''),
+    };
+  });
+}
+
+// Default player codes: A, B, … Z, AA, AB, …
+export function nextPlayerCode(used) {
+  const taken = new Set(used || []);
+  for (let i = 0; ; i++) {
+    let code = '', k = i;
+    do { code = String.fromCharCode(65 + (k % 26)) + code; k = Math.floor(k / 26) - 1; } while (k >= 0);
+    if (!taken.has(code)) return code;
+  }
+}
 
 // Blinds from a game label in any currency: "NL $1/$2", "PLO ₱25/₱50",
 // "NL ₫50,000/₫100,000", "NL RM5/RM10", "NL S$2/S$4" (commas = thousands).
