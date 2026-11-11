@@ -3,7 +3,6 @@ import Home from './screens/Home';
 import SessionSetup from './screens/SessionSetup';
 import SessionView from './screens/SessionView';
 import HandRecorder from './screens/HandRecorder';
-import QuickHandEntry from './screens/QuickHandEntry';
 import HandDetail from './screens/HandDetail';
 import History from './screens/History';
 import Players from './screens/Players';
@@ -49,7 +48,6 @@ export default function App() {
         <Route path="/session/:id" element={<SessionView />} />
         <Route path="/session/:id/record" element={<HandRecorder />} />
         <Route path="/session/:id/record/:resumeId" element={<HandRecorder />} />
-        <Route path="/session/:id/quick" element={<QuickHandEntry />} />
         <Route path="/hand/:id" element={<HandDetail />} />
         <Route path="/hand/:handId/edit" element={<HandRecorder />} />
         <Route path="/history" element={<History />} />

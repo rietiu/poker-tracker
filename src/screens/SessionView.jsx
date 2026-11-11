@@ -382,12 +382,6 @@ export default function SessionView() {
       <div className="sticky-bottom">
         <div className="row gap-8">
           <button
-            className="btn btn-secondary flex-1"
-            onClick={() => navigate(`/session/${id}/quick`)}
-          >
-            Quick
-          </button>
-          <button
             className="btn btn-primary flex-1"
             onClick={() => navigate(`/session/${id}/record`)}
           >
