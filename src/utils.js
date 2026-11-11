@@ -399,3 +399,46 @@ export function allInTap(tapsBefore, pos, amount, ctx) {
   if (n > currentBet) return { pos, action: currentBet > 0 ? 'raise' : 'bet', amount: n, allIn: true };
   return { pos, action: 'call', amount: n, allIn: true };
 }
+
+// ── Hero changed seat after recording (#6) ─────────────────────────────────────
+// streets: { preflop, flop, turn, river } action arrays. Hero's taps move from
+// oldPos to newPos, replacing whatever newPos had; oldPos becomes "never acted"
+// (an implied fold). Each street keeps its longest valid prefix and is closed
+// when possible; if hero now owes an action the street is left open for re-entry.
+export function relocateHero(streets, oldPos, newPos, { totalSeats, sb = 1, bb = 2 }) {
+  if (!oldPos || !newPos || oldPos === newPos) return streets;
+  const table = TABLE_POSITIONS[totalSeats] || TABLE_POSITIONS[9];
+  let live = table;
+  let allIn = [];
+  const out = {};
+  for (const st of ['preflop', 'flop', 'turn', 'river']) {
+    const actions = streets[st] || [];
+    if (actions.length === 0 || live.length <= 1) { out[st] = st in streets ? [] : undefined; continue; }
+    const isPre = st === 'preflop';
+    const fullOrder = (isPre ? PREFLOP_ACTION_ORDER : POSTFLOP_ACTION_ORDER)[totalSeats] || (isPre ? PREFLOP_ACTION_ORDER : POSTFLOP_ACTION_ORDER)[9];
+    const ctx = {
+      actionOrder: fullOrder.filter(p => live.includes(p)),
+      activePositions: live,
+      initialBet: isPre ? bb : 0,
+      initialCommitted: isPre ? { SB: sb, BB: bb } : {},
+      hero: newPos,
+      allInBefore: allIn,
+    };
+    const taps = tapsFromActions(actions, oldPos)
+      .filter(t => t.pos !== newPos)
+      .map(t => (t.pos === oldPos ? { ...t, pos: newPos } : t));
+    let valid = [];
+    for (let i = 1; i <= taps.length; i++) {
+      if (materializeStreet(taps.slice(0, i), ctx).error) break;
+      valid = taps.slice(0, i);
+    }
+    const closed = materializeStreet(valid, { ...ctx, close: true });
+    const result = closed.error ? materializeStreet(valid, ctx) : closed;
+    out[st] = result.actions;
+    const s = computeStreetState(result.actions, ctx.actionOrder, live, ctx.initialBet, ctx.initialCommitted, allIn);
+    live = live.filter(p => !s.foldedSet.has(p));
+    allIn = [...s.allInSet];
+  }
+  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+  return out;
+}
