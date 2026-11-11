@@ -284,8 +284,8 @@ export default function SessionView() {
   }
 
   function resultText(hand) {
-    if (hand.result?.outcome === 'folded') return 'Fold';
     const n = handNet(hand, blinds);
+    if (hand.result?.outcome === 'folded') return n < 0 ? `Fold −${Math.abs(n).toLocaleString()}` : 'Fold';
     return (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString();
   }
 

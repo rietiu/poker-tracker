@@ -294,7 +294,7 @@ export default function HandDetail() {
           {hand.holeCards?.length > 0 && <span style={{ margin: '0 8px' }}>→</span>}
           <span className={res.cls} style={{ fontSize: '1.1rem' }}>{res.text}</span>
         </div>
-        {outcome && outcome !== 'folded' && (
+        {outcome && (outcome !== 'folded' || trueNet !== 0) && (
           <div className={'text-sm mt-8 ' + (trueNet >= 0 ? 'result-won' : 'result-lost')}>
             Net: {trueNet >= 0 ? '+' : '−'}{sym}{Math.abs(trueNet).toLocaleString()}
             {!hand.quick && invested > 0 && (

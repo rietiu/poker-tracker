@@ -56,9 +56,9 @@ export default function History() {
   function resultText(hand) {
     const outcome = hand.result?.outcome;
     if (!outcome) return { text: '—', cls: 'result-fold' };
-    if (outcome === 'folded') return { text: 'Fold', cls: 'result-fold' };
     const sess = sessions.find(x => x.id === hand.sessionId);
     const n = handNet(hand, { sb: parseSB(sess?.game), bb: parseBB(sess?.game) });
+    if (outcome === 'folded') return { text: n < 0 ? `Fold −${Math.abs(n).toLocaleString()}` : 'Fold', cls: 'result-fold' };
     return {
       text: (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString(),
       cls: n >= 0 ? 'result-won' : 'result-lost',
