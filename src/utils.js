@@ -66,6 +66,16 @@ export function calcPosition(totalSeats, mySeat, buttonSeat) {
   return positions[Math.min(offset, positions.length - 1)];
 }
 
+// Inverse of calcPosition: which seat holds the dealer button when I sit in
+// `mySeat` and play `position`. null when it can't be worked out.
+export function buttonSeatFor(totalSeats, mySeat, position) {
+  if (!totalSeats || !mySeat || !position) return null;
+  for (let btn = 1; btn <= totalSeats; btn++) {
+    if (calcPosition(totalSeats, mySeat, btn) === position) return btn;
+  }
+  return null;
+}
+
 export const POSITION_COLORS = {
   BTN: '#f4c430',
   SB: '#5b8dee',
