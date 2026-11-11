@@ -120,7 +120,7 @@ export function parseSB(gameStr) {
 }
 
 // ── Currencies ────────────────────────────────────────────────────────────────
-// PHP + USD + common SE Asian poker currencies. EUR/GBP kept for old sessions.
+// PHP + USD + common SE Asian poker currencies + HKD/MOP. EUR/GBP kept for old sessions.
 export const CURRENCIES = [
   { code: 'PHP', symbol: '₱', name: 'Philippine peso' },
   { code: 'USD', symbol: '$', name: 'US dollar' },
@@ -128,6 +128,8 @@ export const CURRENCIES = [
   { code: 'VND', symbol: '₫', name: 'Vietnamese dong' },
   { code: 'MYR', symbol: 'RM', name: 'Malaysian ringgit' },
   { code: 'SGD', symbol: 'S$', name: 'Singapore dollar' },
+  { code: 'HKD', symbol: 'HK$', name: 'Hong Kong dollar' },
+  { code: 'MOP', symbol: 'MOP$', name: 'Macau pataca' },
   { code: 'EUR', symbol: '€', name: 'Euro' },
   { code: 'GBP', symbol: '£', name: 'British pound' },
 ];

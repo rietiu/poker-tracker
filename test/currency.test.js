@@ -12,6 +12,8 @@ describe('currencies', () => {
     expect(currencySymbol('VND')).toBe('₫');
     expect(currencySymbol('MYR')).toBe('RM');
     expect(currencySymbol('SGD')).toBe('S$');
+    expect(currencySymbol('HKD')).toBe('HK$');
+    expect(currencySymbol('MOP')).toBe('MOP$');
     expect(currencySymbol('EUR')).toBe('€');
     expect(currencySymbol(undefined)).toBe('$');
     expect(currencySymbol('KRW')).toBe('KRW ');
@@ -48,6 +50,8 @@ describe('parseBB / parseSB with any currency', () => {
     ['NL ₫50,000/₫100,000', 50000, 100000],
     ['NL RM5/RM10', 5, 10],
     ['NL S$2/S$4', 2, 4],
+    ['NL HK$25/HK$50', 25, 50],
+    ['NL MOP$50/MOP$100', 50, 100],
     ['NL $0.5/$1', 0.5, 1],
     ['25/50', 25, 50],
   ];
