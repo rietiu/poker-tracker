@@ -451,40 +451,83 @@ export function allInTap(tapsBefore, pos, amount, ctx) {
 // oldPos to newPos, replacing whatever newPos had; oldPos becomes "never acted"
 // (an implied fold). Each street keeps its longest valid prefix and is closed
 // when possible; if hero now owes an action the street is left open for re-entry.
-export function relocateHero(streets, oldPos, newPos, { totalSeats, sb = 1, bb = 2 }) {
+export function relocateHero(streets, oldPos, newPos, opts) {
   if (!oldPos || !newPos || oldPos === newPos) return streets;
+  return rebuildStreets(streets, oldPos, newPos, (actions) => tapsFromActions(actions, oldPos)
+    .filter(t => t.pos !== newPos)
+    .map(t => (t.pos === oldPos ? { ...t, pos: newPos } : t)), opts);
+}
+
+// After an earlier street changed: each later street keeps its longest valid
+// prefix given who is still in (e.g. a player now folded loses their flop bet).
+export function revalidateStreets(streets, hero, opts) {
+  return rebuildStreets(streets, hero, hero, (actions) => tapsFromActions(actions, hero), opts);
+}
+
+// Shared core: replay every street's taps against the live seats left by the
+// previous streets. A street that was closed (its stored list ends with an
+// implied fold, or nobody is left to act) stays closed when it still can be;
+// a street still being entered stays open.
+function rebuildStreets(streets, storedHero, hero, toTaps, { totalSeats, sb = 1, bb = 2 }) {
   const table = TABLE_POSITIONS[totalSeats] || TABLE_POSITIONS[9];
   let live = table;
   let allIn = [];
   const out = {};
   for (const st of ['preflop', 'flop', 'turn', 'river']) {
+    if (!(st in streets)) continue;
     const actions = streets[st] || [];
-    if (actions.length === 0 || live.length <= 1) { out[st] = st in streets ? [] : undefined; continue; }
+    if (actions.length === 0 || live.length <= 1) { out[st] = []; continue; }
     const isPre = st === 'preflop';
-    const fullOrder = (isPre ? PREFLOP_ACTION_ORDER : POSTFLOP_ACTION_ORDER)[totalSeats] || (isPre ? PREFLOP_ACTION_ORDER : POSTFLOP_ACTION_ORDER)[9];
+    const orders = isPre ? PREFLOP_ACTION_ORDER : POSTFLOP_ACTION_ORDER;
     const ctx = {
-      actionOrder: fullOrder.filter(p => live.includes(p)),
+      actionOrder: (orders[totalSeats] || orders[9]).filter(p => live.includes(p)),
       activePositions: live,
       initialBet: isPre ? bb : 0,
       initialCommitted: isPre ? { SB: sb, BB: bb } : {},
-      hero: newPos,
+      hero,
       allInBefore: allIn,
     };
-    const taps = tapsFromActions(actions, oldPos)
-      .filter(t => t.pos !== newPos)
-      .map(t => (t.pos === oldPos ? { ...t, pos: newPos } : t));
+    const taps = toTaps(actions);
     let valid = [];
     for (let i = 1; i <= taps.length; i++) {
       if (materializeStreet(taps.slice(0, i), ctx).error) break;
       valid = taps.slice(0, i);
     }
-    const closed = materializeStreet(valid, { ...ctx, close: true });
-    const result = closed.error ? materializeStreet(valid, ctx) : closed;
+    const last = actions[actions.length - 1];
+    const wasClosed = last.action === 'fold' && last.pos !== storedHero;
+    const open = materializeStreet(valid, ctx);
+    const closed = wasClosed ? materializeStreet(valid, { ...ctx, close: true }) : null;
+    const result = closed && !closed.error ? closed : open;
     out[st] = result.actions;
-    const s = computeStreetState(result.actions, ctx.actionOrder, live, ctx.initialBet, ctx.initialCommitted, allIn);
-    live = live.filter(p => !s.foldedSet.has(p));
-    allIn = [...s.allInSet];
+    const state = computeStreetState(result.actions, ctx.actionOrder, live, ctx.initialBet, ctx.initialCommitted, allIn);
+    live = live.filter(p => !state.foldedSet.has(p));
+    allIn = [...state.allInSet];
   }
-  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+  return out;
+}
+
+// Seats that "Done" would fold right now, in order. Empty when the round is
+// already closed or hero still has to act.
+export function pendingFolds(taps, ctx) {
+  const open = materializeStreet(taps, ctx);
+  if (open.error || open.nextPos === null) return [];
+  const closed = materializeStreet(taps, { ...ctx, close: true });
+  if (closed.error) return [];
+  return closed.actions.slice(open.actions.length).filter(a => a.action === 'fold').map(a => a.pos);
+}
+
+// Distinct non-empty values of `key`, most recent session first (case/space-insensitive).
+export function recentValues(sessions, key, filter = null) {
+  const norm = (v) => v.toLowerCase().replace(/\s+/g, ' ');
+  const seen = new Set();
+  const out = [];
+  const sorted = [...(sessions || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  for (const s of sorted) {
+    if (filter && !filter(s)) continue;
+    const v = (s[key] || '').trim();
+    if (!v || seen.has(norm(v))) continue;
+    seen.add(norm(v));
+    out.push(v);
+  }
   return out;
 }
