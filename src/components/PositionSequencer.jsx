@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState,
-  materializeStreet, tapsFromActions, facingTap, betTap, allInTap, currencySymbol,
+  materializeStreet, tapsFromActions, facingTap, betTap, allInTap, currencySymbol, pendingFolds,
 } from '../utils';
+
+const NEXT_STREET = { preflop: 'Flop', flop: 'Turn', turn: 'River', river: 'Result' };
 
 const POT_FRACS = [
   { label: '1/3', frac: 1 / 3 },
@@ -34,6 +36,8 @@ function actionBadge(action, amount, sym, allIn) {
  *   onComplete(actions)         — street finished (closed actions, or hero folded)
  *   prevPreflopActions          — previous hand's pre-flop actions ("Same as last hand")
  *   allInBefore                 — positions all-in on an earlier street (never asked to act)
+ *   locked                      — message; when set, no action can be entered (e.g. board not picked)
+ *   onBack / backLabel          — Undo with nothing to undo goes back a step
  */
 export default function PositionSequencer({
   totalSeats,
@@ -49,6 +53,9 @@ export default function PositionSequencer({
   onComplete = null,
   prevPreflopActions = null,
   allInBefore = [],
+  locked = '',
+  onBack = null,
+  backLabel = 'Back',
 }) {
   const sym = currencySymbol(currency);
   const isPreflop = street === 'preflop';
@@ -81,19 +88,23 @@ export default function PositionSequencer({
 
   const [raiseFor, setRaiseFor] = useState(null);
   const [pendingAmount, setPendingAmount] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
 
   const onCompleteRef = useRef(onComplete);
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 
   // Auto-advance once the action is unambiguously closed (skip on mount).
   const hasMountedRef = useRef(false);
+  // If the raise panel is open for the seat that just closed the round, wait a
+  // little longer so a raise can still be picked; never jump while typing.
   const autoDone = taps.length > 0 && !heroFolded && !open.error && open.nextPos === null;
+  const autoWaitsForRaise = autoDone && !!raiseFor && lastTap?.pos === raiseFor;
   useEffect(() => {
     if (!hasMountedRef.current) { hasMountedRef.current = true; return; }
-    if (!autoDone) return;
-    const t = setTimeout(() => onCompleteRef.current?.(open.actions), 800);
+    if (!autoDone || inputFocused) return;
+    const t = setTimeout(() => onCompleteRef.current?.(open.actions), autoWaitsForRaise ? 2000 : 800);
     return () => clearTimeout(t);
-  }, [autoDone, taps.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [autoDone, taps.length, inputFocused, autoWaitsForRaise]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Write a new tap log back as stored actions. Returns the materialised result or null.
   function emit(newTaps, close = false) {
@@ -104,19 +115,23 @@ export default function PositionSequencer({
   }
 
   function canTap(pos) {
-    if (heroFolded) return false;
+    if (heroFolded || locked) return false;
     return !materializeStreet([...taps, { pos, action: 'check', amount: 0 }], ctx).error;
   }
 
+  // One tap = call / check, and the bet / raise sizes open right away for that seat.
   function handleTileTap(pos) {
+    if (locked) return;
     if (lastTap && lastTap.pos === pos && lastTap.action !== 'fold') {
       setRaiseFor(raiseFor === pos ? null : pos);
       setPendingAmount('');
       return;
     }
     if (!canTap(pos)) return;
-    setRaiseFor(null);
-    emit([...taps, facingTap(taps, pos, ctx)]);
+    if (emit([...taps, facingTap(taps, pos, ctx)])) {
+      setRaiseFor(pos);
+      setPendingAmount('');
+    }
   }
 
   // Bet / raise replaces the last tap (which belongs to raiseFor).
@@ -187,7 +202,13 @@ export default function PositionSequencer({
   }
 
   const heroCanAct = canTap(myPosition);
-  const doneLabel = closed.error === 'hero-skipped' ? 'Your action first' : 'Done →';
+  const pending = pendingFolds(taps, ctx);
+  const closedState = closed.error ? null : stateOf(closed.actions);
+  const nextName = closedState && activePositions.filter(p => !closedState.foldedSet.has(p)).length <= 1
+    ? 'Result' : NEXT_STREET[street];
+  const doneLabel = closed.error === 'hero-skipped'
+    ? 'Your action first'
+    : pending.length ? `${pending.join(', ')} fold → ${nextName}` : `${nextName} →`;
 
   return (
     <div className="pos-sequencer">
@@ -201,10 +222,12 @@ export default function PositionSequencer({
       <div className="seq-hint text-muted text-xs">
         {taps.length === 0 && !closed.error && closed.nextPos === null && closed.actions.length === 0
           ? 'No one can act — everyone left is all-in. Tap Done.'
-          : 'Tap seats that acted, in order — untapped seats fold. Tap the last seat again to bet / raise / all-in.'}
+          : 'Tap the seats that acted, in order — each tap is a call / check, pick a size below to bet / raise instead. Untapped seats fold.'}
       </div>
 
-      <div className="pos-grid">
+      {locked && <div className="seq-locked">{locked}</div>}
+
+      <div className={'pos-grid' + (locked ? ' pos-grid-locked' : '')}>
         {actionOrder.map(pos => {
           const act = state.lastActionByPos[pos];
           const tapped = taps.some(t => t.pos === pos);
@@ -270,6 +293,8 @@ export default function PositionSequencer({
               placeholder={`Amount ${sym}`}
               value={pendingAmount}
               onChange={e => setPendingAmount(e.target.value)}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
               inputMode="numeric"
               style={{ flex: 1 }}
             />
@@ -291,19 +316,27 @@ export default function PositionSequencer({
         </div>
       )}
 
+      {autoWaitsForRaise && !inputFocused && (
+        <div className="seq-autonext text-xs">Round complete — going to {nextName} in 2s. Pick a raise size to change it.</div>
+      )}
+
       <div className="seq-controls">
-        {prevTaps && (
+        {prevTaps && !locked && (
           <button className="btn btn-secondary btn-sm" onClick={() => emit(prevTaps)}>Same as last hand</button>
         )}
-        <button className="btn btn-secondary btn-sm" onClick={undo} disabled={taps.length === 0} style={{ opacity: taps.length ? 1 : 0.5 }}>
-          ↶ Undo
-        </button>
-        {!heroFolded && heroCanAct && (
+        {taps.length > 0 ? (
+          <button className="btn btn-secondary btn-sm" onClick={undo}>↶ Undo</button>
+        ) : onBack ? (
+          <button className="btn btn-secondary btn-sm" onClick={onBack}>↶ {backLabel}</button>
+        ) : null}
+        {!locked && !heroFolded && heroCanAct && (
           <button className="btn btn-secondary btn-sm seq-fold" onClick={heroFold}>I fold</button>
         )}
-        <button className="btn btn-primary btn-sm" onClick={done} disabled={!!closed.error || heroFolded} style={{ opacity: closed.error || heroFolded ? 0.5 : 1 }}>
-          {doneLabel}
-        </button>
+        {!locked && (
+          <button className="btn btn-primary btn-sm" onClick={done} disabled={!!closed.error || heroFolded} style={{ opacity: closed.error || heroFolded ? 0.5 : 1 }}>
+            {doneLabel}
+          </button>
+        )}
       </div>
     </div>
   );

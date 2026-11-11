@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, currencySymbol } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
@@ -379,6 +379,30 @@ export default function HandRecorder() {
 
   const rakeConfigured = session?.rake != null;
 
+  // A street's actions changed: store them, then re-check every later street
+  // against who is still in (a player who now folds loses their later actions).
+  function setStreetActions(street, actions) {
+    setHand(prev => {
+      const streets = Object.fromEntries(STREETS.map(st => [st, st === street ? actions : prev[st].actions]));
+      const checked = revalidateStreets(streets, prev.myPosition, { totalSeats, sb, bb });
+      const next = { ...prev };
+      let cumulative = null;
+      STREETS.forEach((st, k) => {
+        const acts = STREETS.indexOf(street) >= k ? streets[st] : (checked[st] || []);
+        const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(x => [x, { actions: x === st ? acts : next[x].actions }]));
+        cumulative = Object.values(handContributions(partial, sb, bb)).reduce((a, b) => a + b, 0);
+        next[st] = { ...prev[st], actions: acts, endPot: acts.length ? cumulative : 0 };
+      });
+      return next;
+    });
+  }
+
+  const boardLock = {
+    flop: hand.flop.cards.every(Boolean) ? '' : 'Pick the 3 flop cards first',
+    turn: hand.turn.card ? '' : 'Pick the turn card first',
+    river: hand.river.card ? '' : 'Pick the river card first',
+  };
+
   // A street finished (Done / auto-close / hero folded). Decide the next step
   // from the actions just produced — React state may not have caught up yet.
   const STREET_STEP = { preflop: 2, flop: 3, turn: 4, river: 5 };
@@ -434,7 +458,7 @@ export default function HandRecorder() {
             }
           }}
         >
-          ← Cancel
+          {step === 0 ? '← Cancel' : '← Back'}
         </button>
         <h1>{isEditMode ? 'Edit Hand' : 'Record Hand'}</h1>
       </div>
@@ -503,19 +527,22 @@ export default function HandRecorder() {
       {/* Step 2: Pre-flop */}
       {step === 2 && (
         <div>
+          <div className="street-banner">PRE-FLOP</div>
           <PositionSequencer
             totalSeats={totalSeats}
             street="preflop"
             myPosition={hand.myPosition}
             activePositions={tablePositions}
             actions={hand.preflop.actions}
-            onChange={(actions, endPot) => patchStreet('preflop', { actions, endPot })}
+            onChange={actions => setStreetActions('preflop', actions)}
             startPot={preflopStartPot}
             bb={bb}
             sb={sb}
             currency={currency}
             onComplete={acts => afterStreet('preflop', acts, tablePositions)}
             prevPreflopActions={prevPreflopActions}
+            onBack={() => setStep(1)}
+            backLabel="Back to cards"
           />
 
           <div className="form-group">
@@ -535,6 +562,7 @@ export default function HandRecorder() {
       {/* Step 3: Flop */}
       {step === 3 && (
         <div>
+          <div className="street-banner">FLOP <small>{hand.flop.cards.filter(Boolean).map(formatCard).join(' ')}</small></div>
           <div className="form-group">
             <label className="form-label">Flop Cards</label>
             <InlineCardPicker
@@ -551,12 +579,15 @@ export default function HandRecorder() {
             activePositions={flopActivePositions}
             allInBefore={allInThrough(0)}
             actions={hand.flop.actions}
-            onChange={(actions, endPot) => patchStreet('flop', { actions, endPot })}
+            onChange={actions => setStreetActions('flop', actions)}
             startPot={flopStartPot}
             bb={bb}
             sb={sb}
             currency={currency}
             onComplete={acts => afterStreet('flop', acts, flopActivePositions)}
+            locked={boardLock.flop}
+            onBack={() => setStep(2)}
+            backLabel="Back to pre-flop"
           />
 
           <div className="form-group">
@@ -575,6 +606,7 @@ export default function HandRecorder() {
       {/* Step 4: Turn */}
       {step === 4 && (
         <div>
+          <div className="street-banner">TURN <small>{hand.turn.card ? formatCard(hand.turn.card) : ''}</small></div>
           <div className="form-group">
             <label className="form-label">Turn Card</label>
             <InlineCardPicker
@@ -591,12 +623,15 @@ export default function HandRecorder() {
             activePositions={turnActivePositions}
             allInBefore={allInThrough(1)}
             actions={hand.turn.actions}
-            onChange={(actions, endPot) => patchStreet('turn', { actions, endPot })}
+            onChange={actions => setStreetActions('turn', actions)}
             startPot={turnStartPot}
             bb={bb}
             sb={sb}
             currency={currency}
             onComplete={acts => afterStreet('turn', acts, turnActivePositions)}
+            locked={boardLock.turn}
+            onBack={() => setStep(3)}
+            backLabel="Back to flop"
           />
 
           <div className="form-group">
@@ -615,6 +650,7 @@ export default function HandRecorder() {
       {/* Step 5: River */}
       {step === 5 && (
         <div>
+          <div className="street-banner">RIVER <small>{hand.river.card ? formatCard(hand.river.card) : ''}</small></div>
           <div className="form-group">
             <label className="form-label">River Card</label>
             <InlineCardPicker
@@ -631,12 +667,15 @@ export default function HandRecorder() {
             activePositions={riverActivePositions}
             allInBefore={allInThrough(2)}
             actions={hand.river.actions}
-            onChange={(actions, endPot) => patchStreet('river', { actions, endPot })}
+            onChange={actions => setStreetActions('river', actions)}
             startPot={riverStartPot}
             bb={bb}
             sb={sb}
             currency={currency}
             onComplete={acts => afterStreet('river', acts, riverActivePositions)}
+            locked={boardLock.river}
+            onBack={() => setStep(4)}
+            backLabel="Back to turn"
           />
 
           <div className="form-group">
