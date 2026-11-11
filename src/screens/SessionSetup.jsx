@@ -1,22 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { put, getSessionsSorted } from '../db';
-import { uuid } from '../utils';
+import { uuid, CURRENCIES, currencySymbol } from '../utils';
 import { rakeProfileFor } from '../pots';
 
 const SEAT_COUNTS = [6, 8, 9];
-const CURRENCIES = [
-  { label: 'USD', symbol: '$' },
-  { label: 'PHP', symbol: '₱' },
-  { label: 'EUR', symbol: '€' },
-  { label: 'GBP', symbol: '£' },
-];
 
 export default function SessionSetup() {
   const navigate = useNavigate();
   const [venue, setVenue] = useState('');
-  const [game, setGame] = useState('NL $1/$2');
-  const [currency, setCurrency] = useState('USD');
+  const [game, setGame] = useState('NL ₱25/₱50');
+  const [currency, setCurrency] = useState('PHP');
   const [totalSeats, setTotalSeats] = useState(6);
   const [mySeat, setMySeat] = useState(1);
   const [myStack, setMyStack] = useState('');
@@ -30,7 +24,14 @@ export default function SessionSetup() {
   const pastSessions = allSessions.slice(0, 5);
 
   useEffect(() => {
-    getSessionsSorted().then(setAllSessions);
+    getSessionsSorted().then(all => {
+      setAllSessions(all);
+      // Start from whatever was played last (currency + stakes); first time → pesos.
+      if (all[0]) {
+        if (all[0].currency) setCurrency(all[0].currency);
+        if (all[0].game) setGame(all[0].game);
+      }
+    });
   }, []);
 
   function applyRakeProfile(p) {
@@ -135,7 +136,7 @@ export default function SessionSetup() {
         <input
           type="text"
           className="form-input"
-          placeholder="e.g. NL P50/P100"
+          placeholder={`e.g. NL ${currencySymbol(currency)}25/${currencySymbol(currency)}50`}
           value={game}
           onChange={e => { setGame(e.target.value); autoFillRake(venue, e.target.value); }}
         />
@@ -146,11 +147,12 @@ export default function SessionSetup() {
         <div className="pill-group">
           {CURRENCIES.map(c => (
             <button
-              key={c.label}
-              className={'pill' + (currency === c.label ? ' selected' : '')}
-              onClick={() => setCurrency(c.label)}
+              key={c.code}
+              className={'pill' + (currency === c.code ? ' selected' : '')}
+              onClick={() => setCurrency(c.code)}
+              title={c.name}
             >
-              {c.symbol} {c.label}
+              {c.symbol} {c.code}
             </button>
           ))}
         </div>

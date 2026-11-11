@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllHandsSorted, getSessionsSorted } from '../db';
-import { formatMoney, isRedCard, sumNet, handNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB } from '../utils';
+import { isRedCard, handNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB, currencySymbol, formatSigned, sumByCurrency } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
 function CardBadge({ card }) {
@@ -58,9 +58,9 @@ export default function History() {
     if (!outcome) return { text: '—', cls: 'result-fold' };
     const sess = sessions.find(x => x.id === hand.sessionId);
     const n = handNet(hand, { sb: parseSB(sess?.game), bb: parseBB(sess?.game) });
-    if (outcome === 'folded') return { text: n < 0 ? `Fold −${Math.abs(n).toLocaleString()}` : 'Fold', cls: 'result-fold' };
+    if (outcome === 'folded') return { text: n < 0 ? `Fold −${currencySymbol(sess?.currency)}${Math.abs(n).toLocaleString()}` : 'Fold', cls: 'result-fold' };
     return {
-      text: (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString(),
+      text: formatSigned(n, sess?.currency),
       cls: n >= 0 ? 'result-won' : 'result-lost',
     };
   }
@@ -71,21 +71,27 @@ export default function History() {
 
   const POSITIONS = HISTORY_FILTER_POSITIONS;
 
-  const totalNet = filtered.reduce((sum, h) => {
+  // One total per currency — never add pesos and dollars together.
+  const totals = sumByCurrency(filtered.map(h => {
     const sess = sessions.find(x => x.id === h.sessionId);
-    return sum + sumNet([h], { sb: parseSB(sess?.game), bb: parseBB(sess?.game) });
-  }, 0);
+    return { currency: sess?.currency, amount: handNet(h, { sb: parseSB(sess?.game), bb: parseBB(sess?.game) }) };
+  }));
+
 
   return (
     <div className="screen">
       <div className="screen-header">
         <h1>History</h1>
-        {filtered.length > 0 && (
-          <span className={totalNet >= 0 ? 'result-won' : 'result-lost'}>
-            {formatMoney(totalNet)}
-          </span>
-        )}
       </div>
+      {filtered.length > 0 && (
+        <div className="currency-totals">
+          {Object.entries(totals).map(([code, v]) => (
+            <span key={code} className={'currency-total ' + (v >= 0 ? 'result-won' : 'result-lost')}>
+              {formatSigned(v, code)}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <div style={{ overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: 12, paddingBottom: 4 }}>

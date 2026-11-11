@@ -1467,3 +1467,15 @@ h3 { font-size: 1rem; font-weight: 600; }
 .pot-winner-row { margin-bottom: 12px; }
 .recalc-hint { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--gold); }
 .relocated-note { color: var(--gold); border: 1px solid rgba(244,196,48,0.35); border-radius: var(--radius); padding: 8px 12px; }
+
+/* ── Per-currency totals (never summed across currencies) ───────────────────── */
+.currency-totals { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
+.currency-total {
+  white-space: nowrap;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg2);
+}

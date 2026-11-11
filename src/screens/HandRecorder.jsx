@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, currencySymbol } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
@@ -286,11 +286,10 @@ export default function HandRecorder() {
   }
 
   // ── All derived values (safe with null session via ?.) ──────────────────────
-  const CURRENCY_SYMBOLS = { USD: '$', PHP: '₱', EUR: '€', GBP: '£' };
   const totalSeats = session?.totalSeats || 9;
   const tablePositions = TABLE_POSITIONS[totalSeats] || TABLE_POSITIONS[9];
   const currency = session?.currency || 'USD';
-  const sym = CURRENCY_SYMBOLS[currency] || '$';
+  const sym = currencySymbol(currency);
   const usedCards = allCards(hand);
   const progress = ((step + 1) / TOTAL) * 100;
   const showStickyBar = step >= 2;

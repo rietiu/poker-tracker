@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSessionsSorted, getHandsBySession } from '../db';
-import { formatMoney, sumNet, parseBB, parseSB } from '../utils';
+import { sumNet, parseBB, parseSB, formatSigned, sumByCurrency } from '../utils';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -36,21 +36,25 @@ export default function Home() {
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  const net = Object.values(netResults).reduce((a, b) => a + b, 0);
+  // Never add different currencies together: one total per currency.
+  const totals = sumByCurrency(sessions.map(s => ({ currency: s.currency, amount: netResults[s.id] || 0 })));
+
 
   return (
     <div className="screen">
       <div className="screen-header">
         <h1>🃏 Poker Tracker</h1>
-        <div className="row gap-8">
-          {sessions.length > 0 && (
-            <span className={net >= 0 ? 'result-won' : 'result-lost'} style={{ fontSize: '1rem' }}>
-              {formatMoney(net)}
-            </span>
-          )}
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/backup')}>Backup</button>
-        </div>
+        <button className="btn btn-ghost btn-sm" onClick={() => navigate('/backup')}>Backup</button>
       </div>
+      {Object.keys(totals).length > 0 && (
+        <div className="currency-totals">
+          {Object.entries(totals).map(([code, v]) => (
+            <span key={code} className={'currency-total ' + (v >= 0 ? 'result-won' : 'result-lost')}>
+              {formatSigned(v, code)}
+            </span>
+          ))}
+        </div>
+      )}
 
       {sessions.length === 0 ? (
         <div className="empty-state">
@@ -74,7 +78,7 @@ export default function Home() {
                   <div className="text-muted text-sm">{s.game} · {fmtDate(s.date)}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatMoney(n)}</div>
+                  <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(n, s.currency)}</div>
                   <div className="text-muted text-xs">{handCounts[s.id] || 0} hands</div>
                 </div>
               </div>

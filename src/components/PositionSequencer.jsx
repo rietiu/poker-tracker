@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState,
-  materializeStreet, tapsFromActions, facingTap, betTap, allInTap,
+  materializeStreet, tapsFromActions, facingTap, betTap, allInTap, currencySymbol,
 } from '../utils';
 
 const POT_FRACS = [
@@ -12,8 +12,6 @@ const POT_FRACS = [
 ];
 const BB_OPEN_SIZES = [2.5, 3, 4, 5];     // pre-flop open, in BB
 const RERAISE_MULTIPLES = [2.5, 3, 4];    // facing a bet, × current bet
-
-const CURRENCY_SYMBOLS = { USD: '$', PHP: '₱', EUR: '€', GBP: '£' };
 
 function actionBadge(action, amount, sym, allIn) {
   if (allIn) return `AI${sym}${amount}`;
@@ -52,7 +50,7 @@ export default function PositionSequencer({
   prevPreflopActions = null,
   allInBefore = [],
 }) {
-  const sym = CURRENCY_SYMBOLS[currency] || '$';
+  const sym = currencySymbol(currency);
   const isPreflop = street === 'preflop';
   const sbVal = sb != null ? sb : Math.round(bb / 2);
   const roundToBB = (amount) => (bb > 0 ? Math.round(amount / bb) * bb : Math.round(amount));

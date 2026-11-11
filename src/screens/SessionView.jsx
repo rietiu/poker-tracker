@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, put, del, getHandsBySession } from '../db';
-import { formatMoney, isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB } from '../utils';
+import { isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector } from '../components/PlayerTag';
 
@@ -20,7 +20,7 @@ function CardBadge({ card }) {
   );
 }
 
-function SeatEditSheet({ seatNum, seat, isMySeat, totalSeats, onSave, onMovePlayer, onMoveMySeat, onClose }) {
+function SeatEditSheet({ seatNum, seat, isMySeat, totalSeats, sym, onSave, onMovePlayer, onMoveMySeat, onClose }) {
   const s = seat || {};
   const isLeft = s.status === 'left';
 
@@ -67,7 +67,7 @@ function SeatEditSheet({ seatNum, seat, isMySeat, totalSeats, onSave, onMovePlay
         )}
 
         <div className="form-group">
-          <label className="form-label">Est. Stack ($)</label>
+          <label className="form-label">Est. Stack ({sym})</label>
           <input
             type="number"
             className="form-input"
@@ -190,7 +190,7 @@ function SeatGrid({ session, onSeatTap }) {
               {isMe ? 'You' : (seat.name || '—')}
             </div>
             {seat.estimatedStack ? (
-              <div className="ssc-stack">${Number(seat.estimatedStack).toLocaleString()}</div>
+              <div className="ssc-stack">{currencySymbol(session.currency)}{Number(seat.estimatedStack).toLocaleString()}</div>
             ) : null}
             {(seat.tags || []).length > 0 && (
               <div className="ssc-tags">
@@ -302,7 +302,7 @@ export default function SessionView() {
           <div className="text-muted text-sm">{session.game} · {session.totalSeats}-handed</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div className={netResult >= 0 ? 'result-won' : 'result-lost'}>{formatMoney(netResult)}</div>
+          <div className={netResult >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(netResult, session.currency)}</div>
           <div className="text-muted text-xs">{completedHands.length} hands</div>
         </div>
       </div>
@@ -402,6 +402,7 @@ export default function SessionView() {
           seat={editingSeatData}
           isMySeat={editingSeat === session.mySeat}
           totalSeats={session.totalSeats}
+          sym={currencySymbol(session.currency)}
           onSave={handleSeatSave}
           onMovePlayer={handleMovePlayer}
           onMoveMySeat={handleMoveMySeat}

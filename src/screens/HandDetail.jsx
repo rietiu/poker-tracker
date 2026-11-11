@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, del } from '../db';
-import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB } from '../utils';
+import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB, currencySymbol } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
-const CURRENCY_SYMBOLS = { USD: '$', PHP: '₱', EUR: '€', GBP: '£' };
 
 // ── Position labels ──────────────────────────────────────────────────────────
 const POS_ZH = {
@@ -17,7 +16,7 @@ const ACTION_ZH = { fold: '弃牌', check: '过牌', call: '跟注', bet: '下�
 // ── Hand history generator ───────────────────────────────────────────────────
 function generateHandText(hand, session, lang) {
   const zh = lang === 'zh';
-  const sym = CURRENCY_SYMBOLS[session?.currency || 'USD'] || '$';
+  const sym = currencySymbol(session?.currency);
   const fmt = (n) => sym + Number(n).toLocaleString();
   const card = (c) => c ? formatCard(c) : '?';
   const cards = (arr) => (arr || []).filter(Boolean).map(card).join(' ');
@@ -251,7 +250,7 @@ export default function HandDetail() {
 
   if (!hand) return <div className="screen"><div className="text-muted">Loading…</div></div>;
 
-  const sym = CURRENCY_SYMBOLS[session?.currency || 'USD'] || '$';
+  const sym = currencySymbol(session?.currency);
   const { outcome, amount } = hand.result || {};
 
   function resultText() {
