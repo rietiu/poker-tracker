@@ -287,7 +287,8 @@ export function handNet(hand, opts = {}) {
         net = amt - heroInvested(hand, sb, bb);
         break;
       case 'folded':
-        net = -heroBlindPosted(hand, sb, bb);
+        // heroInvested already includes hero's own blind
+        net = -heroInvested(hand, sb, bb);
         break;
       default:
         net = 0;
@@ -316,4 +317,64 @@ export function nextHandNum(hands) {
   return (hands || [])
     .filter(h => !h.incomplete)
     .reduce((m, h) => Math.max(m, Number(h.handNum) || 0), 0) + 1;
+}
+
+// ── Fast sequencer: tap log → action list ─────────────────────────────────────
+// taps: chronological [{pos, action, amount}] — only seats that did something
+// (hero may also appear with an explicit fold). Seats skipped between taps are
+// emitted as folds; with ctx.close, every seat still due to act is folded too.
+// Hero is never an implied fold: skipping hero returns error 'hero-skipped'.
+export function materializeStreet(taps, ctx) {
+  const { actionOrder, activePositions, initialBet = 0, initialCommitted = {}, hero = null, close = false } = ctx;
+  const actions = [];
+  const nextOf = () =>
+    computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted).nextPos;
+
+  const foldUntil = (target) => {
+    for (;;) {
+      const next = nextOf();
+      if (next === null) return target === null ? null : 'not-live';
+      if (next === target) return null;
+      if (next === hero) return 'hero-skipped';
+      actions.push({ pos: next, action: 'fold', amount: 0 });
+    }
+  };
+
+  for (const t of taps || []) {
+    const err = foldUntil(t.pos);
+    if (err) return { actions, nextPos: nextOf(), error: err };
+    actions.push({ pos: t.pos, action: t.action, amount: t.amount || 0 });
+  }
+  if (close) {
+    const err = foldUntil(null);
+    if (err) return { actions, nextPos: nextOf(), error: err };
+  }
+  return { actions, nextPos: nextOf(), error: null };
+}
+
+// Stored actions → tap log (implied folds dropped, hero's own fold kept).
+export function tapsFromActions(actions, hero) {
+  return (actions || [])
+    .filter(a => a.action !== 'fold' || a.pos === hero)
+    .map(a => ({ pos: a.pos, action: a.action, amount: a.amount || 0 }));
+}
+
+function streetStateAfter(taps, ctx) {
+  const { actions } = materializeStreet(taps, { ...ctx, close: false });
+  return computeStreetState(actions, ctx.actionOrder, ctx.activePositions, ctx.initialBet || 0, ctx.initialCommitted || {});
+}
+
+// Default action for tapping `pos`: call if it owes chips, else check.
+export function facingTap(taps, pos, ctx) {
+  const { currentBet, committed } = streetStateAfter(taps, ctx);
+  return currentBet - (committed[pos] || 0) > 0
+    ? { pos, action: 'call', amount: currentBet }
+    : { pos, action: 'check', amount: 0 };
+}
+
+// A bet / raise-to for `pos` after `tapsBefore`; null if the size is invalid.
+export function betTap(tapsBefore, pos, amount, ctx) {
+  const { currentBet } = streetStateAfter(tapsBefore, ctx);
+  if (!isValidBetAmount(amount, currentBet)) return null;
+  return { pos, action: currentBet > 0 ? 'raise' : 'bet', amount: Number(amount) };
 }
