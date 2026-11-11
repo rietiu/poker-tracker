@@ -94,3 +94,23 @@ describe('heroTake', () => {
     expect(heroTake([{ amount: 2, eligible: ['BB'], winners: ['BB'] }], 'BB', 0, { pos: 'BB', amount: 1 })).toBe(3);
   });
 });
+
+import { rakeProfileFor } from '../src/pots.js';
+
+describe('rakeProfileFor', () => {
+  const sessions = [
+    { venue: 'Okada', game: 'NL ₱25/₱50', createdAt: '2026-10-01T10:00:00Z', rakeType: 'percent', rake: 5, rakeMax: 300, jackpot: 20 },
+    { venue: 'okada ', game: 'nl ₱25/₱50', createdAt: '2026-11-01T10:00:00Z', rakeType: 'percent', rake: 5, rakeMax: 400, jackpot: 25 },
+    { venue: 'Okada', game: 'NL ₱50/₱100', createdAt: '2026-11-05T10:00:00Z', rakeType: 'percent', rake: 5, rakeMax: 600, jackpot: 50 },
+  ];
+  it('latest session with the same venue + game (case / space insensitive)', () => {
+    expect(rakeProfileFor(sessions, 'OKADA', 'NL ₱25/₱50')).toEqual({ rakeType: 'percent', rake: 5, rakeMax: 400, jackpot: 25 });
+  });
+  it('different stakes at the same venue have their own settings', () => {
+    expect(rakeProfileFor(sessions, 'Okada', 'NL ₱50/₱100').rakeMax).toBe(600);
+  });
+  it('no match → null', () => {
+    expect(rakeProfileFor(sessions, 'Solaire', 'NL ₱25/₱50')).toBe(null);
+    expect(rakeProfileFor(sessions, '', 'NL ₱25/₱50')).toBe(null);
+  });
+});

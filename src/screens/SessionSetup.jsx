@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { put, getSessionsSorted } from '../db';
 import { uuid } from '../utils';
+import { rakeProfileFor } from '../pots';
 
 const SEAT_COUNTS = [6, 8, 9];
 const CURRENCIES = [
@@ -22,20 +23,45 @@ export default function SessionSetup() {
   const [rakeType, setRakeType] = useState('percent');
   const [rake, setRake] = useState('');
   const [rakeMax, setRakeMax] = useState('');
-  const [pastSessions, setPastSessions] = useState([]);
+  const [jackpot, setJackpot] = useState('');
+  const [rakeEdited, setRakeEdited] = useState(false); // user typed rake fields → don't auto-fill over them
+  const [rakeSource, setRakeSource] = useState('');    // e.g. "Okada · NL ₱25/₱50" when auto-filled
+  const [allSessions, setAllSessions] = useState([]);
+  const pastSessions = allSessions.slice(0, 5);
 
   useEffect(() => {
-    getSessionsSorted().then(all => setPastSessions(all.slice(0, 5)));
+    getSessionsSorted().then(setAllSessions);
   }, []);
+
+  function applyRakeProfile(p) {
+    setRakeType(p.rakeType);
+    setRake(p.rake != null ? String(p.rake) : '');
+    setRakeMax(p.rakeMax ? String(p.rakeMax) : '');
+    setJackpot(p.jackpot ? String(p.jackpot) : '');
+  }
+
+  // Rake depends on venue + stakes: fill from the last session at the same place and level.
+  function autoFillRake(nextVenue, nextGame) {
+    if (rakeEdited) return;
+    const p = rakeProfileFor(allSessions, nextVenue, nextGame);
+    if (p) {
+      applyRakeProfile(p);
+      setRakeSource(`${nextVenue.trim()} · ${nextGame.trim()}`);
+    } else if (rakeSource) {
+      applyRakeProfile({ rakeType: 'percent', rake: null, rakeMax: 0, jackpot: 0 });
+      setRakeSource('');
+    }
+  }
+  const editRake = (setter) => (e) => { setter(e.target.value); setRakeEdited(true); setRakeSource(''); };
 
   function applyPreset(s) {
     if (s.venue) setVenue(s.venue);
     if (s.game) setGame(s.game);
     if (s.currency) setCurrency(s.currency);
     if (s.totalSeats) setTotalSeats(s.totalSeats);
-    if (s.rakeType) setRakeType(s.rakeType);
-    if (s.rake != null) setRake(String(s.rake));
-    if (s.rakeMax != null) setRakeMax(String(s.rakeMax));
+    applyRakeProfile({ rakeType: s.rakeType || 'percent', rake: s.rake, rakeMax: s.rakeMax || 0, jackpot: s.jackpot || 0 });
+    setRakeEdited(false);
+    setRakeSource(s.rake != null ? `${(s.venue || '').trim()} · ${(s.game || '').trim()}` : '');
   }
 
   async function handleStart() {
@@ -57,6 +83,7 @@ export default function SessionSetup() {
       rakeType,
       rake: rake !== '' ? Number(rake) : null,
       rakeMax: rakeMax !== '' ? Number(rakeMax) : 0,
+      jackpot: jackpot !== '' ? Number(jackpot) : 0,
       myStack: Number(myStack) || 0,
       mySeat,
       seats: seatArr,
@@ -99,7 +126,7 @@ export default function SessionSetup() {
           className="form-input"
           placeholder="e.g. Resorts World"
           value={venue}
-          onChange={e => setVenue(e.target.value)}
+          onChange={e => { setVenue(e.target.value); autoFillRake(e.target.value, game); }}
         />
       </div>
 
@@ -110,7 +137,7 @@ export default function SessionSetup() {
           className="form-input"
           placeholder="e.g. NL P50/P100"
           value={game}
-          onChange={e => setGame(e.target.value)}
+          onChange={e => { setGame(e.target.value); autoFillRake(venue, e.target.value); }}
         />
       </div>
 
@@ -173,9 +200,12 @@ export default function SessionSetup() {
 
       <div className="form-group">
         <label className="form-label">Commission / Rake <span className="text-muted text-xs">(optional)</span></label>
+        {rakeSource && (
+          <div className="text-muted text-xs mb-8">Filled from your last session at {rakeSource}</div>
+        )}
         <div className="pill-group mb-8">
-          <button className={'pill' + (rakeType === 'percent' ? ' selected' : '')} onClick={() => setRakeType('percent')}>% of pot</button>
-          <button className={'pill' + (rakeType === 'flat' ? ' selected' : '')} onClick={() => setRakeType('flat')}>Flat per hand</button>
+          <button className={'pill' + (rakeType === 'percent' ? ' selected' : '')} onClick={() => { setRakeType('percent'); setRakeEdited(true); setRakeSource(''); }}>% of pot</button>
+          <button className={'pill' + (rakeType === 'flat' ? ' selected' : '')} onClick={() => { setRakeType('flat'); setRakeEdited(true); setRakeSource(''); }}>Flat per hand</button>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
@@ -183,7 +213,7 @@ export default function SessionSetup() {
             className="form-input"
             placeholder={rakeType === 'percent' ? 'e.g. 5 (for 5%)' : 'e.g. 500 (fixed)'}
             value={rake}
-            onChange={e => setRake(e.target.value)}
+            onChange={editRake(setRake)}
             inputMode="numeric"
             style={{ flex: 1 }}
           />
@@ -193,12 +223,25 @@ export default function SessionSetup() {
               className="form-input"
               placeholder="Max cap"
               value={rakeMax}
-              onChange={e => setRakeMax(e.target.value)}
+              onChange={editRake(setRakeMax)}
               inputMode="numeric"
               style={{ width: 100 }}
             />
           )}
         </div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Jackpot per hand <span className="text-muted text-xs">(optional)</span></label>
+        <input
+          type="number"
+          className="form-input"
+          placeholder="e.g. 20 — taken from every pot that sees a flop"
+          value={jackpot}
+          onChange={editRake(setJackpot)}
+          inputMode="numeric"
+        />
+        <div className="text-muted text-xs mt-4">No rake or jackpot when the hand ends before the flop.</div>
       </div>
 
       <div style={{ paddingBottom: 24 }}>

@@ -110,3 +110,21 @@ export function heroTake(potsWithWinners, hero, rakeTotal = 0, uncalled = null) 
   if (uncalled && uncalled.pos === hero) take += uncalled.amount;
   return round2(take);
 }
+
+// Rake settings depend on venue and stakes. Latest session with the same
+// venue + game (trimmed, case-insensitive) → its rake settings, else null.
+export function rakeProfileFor(sessions, venue, game) {
+  const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const v = norm(venue), g = norm(game);
+  if (!v || !g) return null;
+  const match = (sessions || [])
+    .filter(s => norm(s.venue) === v && norm(s.game) === g && s.rake != null)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+  if (!match) return null;
+  return {
+    rakeType: match.rakeType || 'percent',
+    rake: match.rake,
+    rakeMax: match.rakeMax || 0,
+    jackpot: match.jackpot || 0,
+  };
+}
