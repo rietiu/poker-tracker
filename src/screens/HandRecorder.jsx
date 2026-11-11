@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, calcPosition, buttonSeatFor } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
@@ -255,6 +255,10 @@ export default function HandRecorder() {
       id: uuid(),
       sessionId: sid,
       handNum,
+      dealt: dealtCount,
+      buttonSeat: buttonSeat || null,
+      // who sat where for this hand — the basis for per-player notes later
+      seating: buttonSeat ? seatingAtHand(session?.seats, activeSeats, mySeatNum, buttonSeat) : null,
       myPosition: hand.myPosition,
       holeCards: hand.holeCards,
       preflop: {
@@ -295,7 +299,15 @@ export default function HandRecorder() {
 
   // ── All derived values (safe with null session via ?.) ──────────────────────
   const totalSeats = session?.totalSeats || 9;
-  const tablePositions = TABLE_POSITIONS[totalSeats] || TABLE_POSITIONS[9];
+  // Only seated players are dealt in (away / empty seats skipped). Editing an old
+  // hand keeps the player count it was recorded with.
+  const activeSeats = session ? activeSeatNums(session) : [];
+  const dealtCount = isEditMode && editRecord
+    ? (editRecord.dealt || totalSeats)
+    : Math.min(9, Math.max(2, activeSeats.length || totalSeats));
+  const tablePositions = TABLE_POSITIONS[dealtCount] || TABLE_POSITIONS[9];
+  const mySeatNum = session?.mySeat || 1;
+  const buttonSeat = buttonSeatAmong(activeSeats, mySeatNum, hand.myPosition);
   const currency = session?.currency || 'USD';
   const sym = currencySymbol(currency);
   const usedCards = allCards(hand);
@@ -359,7 +371,7 @@ export default function HandRecorder() {
     const old = hand.myPosition;
     const hasActions = STREETS.some(st => hand[st].actions.length > 0);
     if (!old || old === pos || !hasActions) { patchHand({ myPosition: pos }); return; }
-    const moved = relocateHero(Object.fromEntries(STREETS.map(st => [st, hand[st].actions])), old, pos, { totalSeats, sb, bb });
+    const moved = relocateHero(Object.fromEntries(STREETS.map(st => [st, hand[st].actions])), old, pos, { totalSeats: dealtCount, sb, bb });
     const potThrough = (k) => {
       const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(st => [st, { actions: moved[st] || [] }]));
       return Object.values(handContributions(partial, sb, bb)).reduce((a, b) => a + b, 0);
@@ -392,7 +404,7 @@ export default function HandRecorder() {
   function setStreetActions(street, actions) {
     setHand(prev => {
       const streets = Object.fromEntries(STREETS.map(st => [st, st === street ? actions : prev[st].actions]));
-      const checked = revalidateStreets(streets, prev.myPosition, { totalSeats, sb, bb });
+      const checked = revalidateStreets(streets, prev.myPosition, { totalSeats: dealtCount, sb, bb });
       const next = { ...prev };
       let cumulative = null;
       STREETS.forEach((st, k) => {
@@ -513,30 +525,37 @@ export default function HandRecorder() {
                 ))}
               </div>
             </div>
-          ) : (() => {
-            const mySeat = session.mySeat || 1;
-            const btnSeat = buttonSeatFor(totalSeats, mySeat, hand.myPosition);
-            return (
-              <div className="form-group">
-                <label className="form-label">Which seat has the dealer button? <span className="text-muted text-xs">(you're in seat {mySeat})</span></label>
-                <div className="seat-grid">
-                  {Array.from({ length: totalSeats }, (_, i) => i + 1).map(n => (
+          ) : (
+            <div className="form-group">
+              <label className="form-label">Which seat has the dealer button? <span className="text-muted text-xs">(you're in seat {mySeatNum})</span></label>
+              <div className="seat-grid">
+                {Array.from({ length: totalSeats }, (_, i) => i + 1).map(n => {
+                  const seat = (session.seats || []).find(x => x.seatNum === n) || {};
+                  const out = n !== mySeatNum && SEAT_OUT.includes(seat.status);
+                  const who = n === mySeatNum ? 'You' : (seat.name || seat.code || '');
+                  return (
                     <button
                       key={n}
-                      className={'seat-btn seat-btn-labelled' + (n === btnSeat ? ' is-btn' : n === mySeat ? ' is-me' : '')}
-                      onClick={() => changePosition(calcPosition(totalSeats, mySeat, n))}
+                      disabled={out}
+                      className={'seat-btn seat-btn-labelled' + (out ? ' seat-out' : n === buttonSeat ? ' is-btn' : n === mySeatNum ? ' is-me' : '')}
+                      onClick={() => changePosition(positionAmong(activeSeats, mySeatNum, n))}
                     >
                       <span>{n}</span>
-                      <span className="seat-sub">
-                        {n === btnSeat ? 'D' : n === mySeat ? 'You' : ''}
-                        {btnSeat && n !== btnSeat ? `${n === mySeat ? ' · ' : ''}${calcPosition(totalSeats, n, btnSeat)}` : ''}
-                      </span>
+                      <span className="seat-sub">{out ? (seat.status === 'away' ? 'Away' : 'Empty') : who}</span>
+                      {!out && buttonSeat && (
+                        <span className="seat-sub">{n === buttonSeat ? 'D' : positionAmong(activeSeats, n, buttonSeat)}</span>
+                      )}
                     </button>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-            );
-          })()}
+            </div>
+          )}
+          {!isEditMode && activeSeats.length < totalSeats && (
+            <div className="text-muted text-xs mb-12">
+              {dealtCount} players dealt in — seat {Array.from({ length: totalSeats }, (_, i) => i + 1).filter(n => !activeSeats.includes(n)).join(', ')} away or empty
+            </div>
+          )}
 
           {relocatedNote && <div className="relocated-note text-sm mb-12">{relocatedNote}</div>}
           {hand.myPosition && (
@@ -567,7 +586,7 @@ export default function HandRecorder() {
         <div>
           <div className="street-banner">PRE-FLOP</div>
           <PositionSequencer
-            totalSeats={totalSeats}
+            totalSeats={dealtCount}
             street="preflop"
             myPosition={hand.myPosition}
             activePositions={tablePositions}
@@ -611,7 +630,7 @@ export default function HandRecorder() {
           </div>
 
           <PositionSequencer
-            totalSeats={totalSeats}
+            totalSeats={dealtCount}
             street="flop"
             myPosition={hand.myPosition}
             activePositions={flopActivePositions}
@@ -655,7 +674,7 @@ export default function HandRecorder() {
           </div>
 
           <PositionSequencer
-            totalSeats={totalSeats}
+            totalSeats={dealtCount}
             street="turn"
             myPosition={hand.myPosition}
             activePositions={turnActivePositions}
@@ -699,7 +718,7 @@ export default function HandRecorder() {
           </div>
 
           <PositionSequencer
-            totalSeats={totalSeats}
+            totalSeats={dealtCount}
             street="river"
             myPosition={hand.myPosition}
             activePositions={riverActivePositions}

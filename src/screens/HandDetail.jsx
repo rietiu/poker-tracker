@@ -304,6 +304,19 @@ export default function HandDetail() {
         {hand.result?.notes && <div className="text-muted text-sm mt-8">{hand.result.notes}</div>}
       </div>
 
+      {hand.seating?.length > 0 && (
+        <div className="card mb-16">
+          <div className="text-muted text-sm mb-8">Table this hand · {hand.dealt || hand.seating.length} players</div>
+          {hand.seating.map(p => (
+            <div key={p.seat} className={'seating-row' + (p.code === 'ME' ? ' seating-me' : '')}>
+              <span className="text-muted">Seat {p.seat}</span>
+              <span>{p.code === 'ME' ? 'Me' : p.name ? `${p.name} (${p.code})` : p.code}</span>
+              <PositionBadge position={p.position} />
+            </div>
+          ))}
+        </div>
+      )}
+
       <StreetRow label="Pre-flop" street={{ ...hand.preflop, notes: hand.preflop?.notes }} sym={sym} />
       {hand.flop && <StreetRow label="Flop" street={hand.flop} cards={hand.flop.cards} sym={sym} />}
       {hand.turn && <StreetRow label="Turn" street={hand.turn} cards={[hand.turn.card]} sym={sym} />}

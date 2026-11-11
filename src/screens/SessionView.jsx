@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, put, del, getHandsBySession } from '../db';
-import { isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame } from '../utils';
+import { isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector } from '../components/PlayerTag';
 
@@ -20,149 +20,98 @@ function CardBadge({ card }) {
   );
 }
 
-function SeatEditSheet({ seatNum, seat, isMySeat, totalSeats, sym, onSave, onMovePlayer, onMoveMySeat, onClose }) {
+// One seat at the table: who's there (code / nickname / tags / stack) and what
+// happened (away, back, left, someone new, moved). I can move to an empty seat.
+function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, onSaveDetails, onEvent, onClose }) {
   const s = seat || {};
-  const isLeft = s.status === 'left';
-
+  const status = s.status || 'active';
   const [name, setName] = useState(s.name || '');
   const [stack, setStack] = useState(String(s.estimatedStack || ''));
   const [tags, setTags] = useState(s.tags || []);
   const [showMoveMenu, setShowMoveMenu] = useState(false);
+  const emptySeats = (session.seats || [])
+    .filter(x => x.status === 'empty' && x.seatNum !== session.mySeat)
+    .map(x => x.seatNum);
 
-  function save(patch = {}) {
-    onSave(seatNum, { name: name.trim(), tags, estimatedStack: stack ? Number(stack) : '', status: 'active', ...patch });
+  function saveDetails() {
+    onSaveDetails(seatNum, { name: name.trim(), tags, estimatedStack: stack ? Number(stack) : '' });
   }
+
+  const moveMenu = (onPick) => (
+    emptySeats.length === 0
+      ? <div className="text-muted text-sm mb-8">No empty seat — mark a seat empty first.</div>
+      : (
+        <div className="seat-grid" style={{ marginBottom: 8 }}>
+          {emptySeats.map(n => (
+            <button key={n} className="seat-btn" onClick={() => onPick(n)}>{n}</button>
+          ))}
+        </div>
+      )
+  );
 
   return (
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-header">
-          <h2>Seat {seatNum}{isMySeat ? ' (You)' : ''}</h2>
+          <h2>Seat {seatNum}{isMySeat ? ' (You)' : s.code ? ` · ${s.code}` : ''}</h2>
           <button className="back-btn" style={{ minHeight: 'auto', paddingRight: 0 }} onClick={onClose}>✕</button>
         </div>
 
-        {isLeft && (
-          <div className="seat-status-banner left-banner">Player has left the table</div>
-        )}
-
-        {!isMySeat && (
-          <div className="form-group">
-            <label className="form-label">Nickname</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                className="form-input"
-                placeholder="Name (optional)"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button
-                className="btn btn-secondary btn-sm"
-                style={{ flexShrink: 0 }}
-                onClick={() => setName(randomPlayerName())}
-                title="Random nickname"
-              >?</button>
-            </div>
-          </div>
-        )}
-
-        <div className="form-group">
-          <label className="form-label">Est. Stack ({sym})</label>
-          <input
-            type="number"
-            className="form-input"
-            placeholder="0"
-            value={stack}
-            onChange={e => setStack(e.target.value)}
-            inputMode="numeric"
-          />
-          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            {[-500, -200, +200, +500].map(d => (
-              <button
-                key={d}
-                className="quick-add-btn"
-                style={{ flex: 1 }}
-                onClick={() => setStack(String(Math.max(0, (Number(stack) || 0) + d)))}
-              >
-                {d > 0 ? '+' : ''}{d}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {!isMySeat && (
-          <div className="form-group">
-            <label className="form-label">Tags</label>
-            <TagSelector selected={tags} onChange={setTags} />
-          </div>
-        )}
-
-        <button className="btn btn-primary btn-full mb-8" onClick={() => save()}>
-          Save Changes
-        </button>
-
-        {!isMySeat && !isLeft && (
-          <button className="btn btn-secondary btn-full mb-8" onClick={() => save({ status: 'left' })}>
-            Player Left
-          </button>
-        )}
-
-        {!isMySeat && isLeft && (
-          <button className="btn btn-secondary btn-full mb-8" onClick={() => save({ status: 'active' })}>
-            Re-entry (same seat)
-          </button>
-        )}
-
-        {!isMySeat && (
+        {isMySeat ? (
           <>
-            <button
-              className="btn btn-secondary btn-full mb-8"
-              onClick={() => setShowMoveMenu(v => !v)}
-            >
-              Move player to seat…
-            </button>
-            {showMoveMenu && (
-              <div className="seat-grid" style={{ marginBottom: 8 }}>
-                {Array.from({ length: totalSeats }, (_, i) => i + 1)
-                  .filter(n => n !== seatNum)
-                  .map(n => (
-                    <button
-                      key={n}
-                      className="seat-btn"
-                      onClick={() => { onMovePlayer(seatNum, n); onClose(); }}
-                    >
-                      {n}
-                    </button>
-                  ))}
-              </div>
-            )}
-            <button
-              className="btn btn-secondary btn-full mb-8"
-              style={{ color: 'var(--text2)' }}
-              onClick={() => save({ name: '', tags: [], estimatedStack: '', status: 'active' })}
-            >
-              Clear Seat
+            <div className="form-group">
+              <label className="form-label">Move to an empty seat</label>
+              {moveMenu(n => onEvent({ type: 'heroMove', to: n }))}
+            </div>
+          </>
+        ) : status === 'empty' ? (
+          <>
+            <div className="seat-status-banner left-banner">Empty seat — nobody sitting</div>
+            <button className="btn btn-primary btn-full mb-8" onClick={() => onEvent({ type: 'seated', seat: seatNum })}>
+              Someone sat down
             </button>
           </>
-        )}
+        ) : (
+          <>
+            {status === 'away' && <div className="seat-status-banner away-banner">Away from the table — not dealt in</div>}
 
-        {isMySeat && (
-          <div className="form-group">
-            <label className="form-label">Move my seat to</label>
-            <div className="seat-grid">
-              {Array.from({ length: totalSeats }, (_, i) => i + 1)
-                .filter(n => n !== seatNum)
-                .map(n => (
-                  <button
-                    key={n}
-                    className="seat-btn"
-                    onClick={() => { onMoveMySeat(n); onClose(); }}
-                  >
-                    {n}
-                  </button>
-                ))}
+            <div className="form-group">
+              <label className="form-label">Nickname <span className="text-muted text-xs">(code {s.code})</span></label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="form-input"
+                  placeholder={`e.g. Korean, fast — or keep "${s.code}"`}
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0 }} onClick={() => setName(randomPlayerName())} title="Random nickname">?</button>
+              </div>
             </div>
-          </div>
+
+            <div className="form-group">
+              <label className="form-label">Est. Stack ({sym})</label>
+              <input type="number" className="form-input" placeholder="0" value={stack} onChange={e => setStack(e.target.value)} inputMode="numeric" />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Tags</label>
+              <TagSelector selected={tags} onChange={setTags} />
+            </div>
+
+            <button className="btn btn-primary btn-full mb-8" onClick={saveDetails}>Save</button>
+
+            {status === 'away' ? (
+              <button className="btn btn-secondary btn-full mb-8" onClick={() => onEvent({ type: 'back', seat: seatNum })}>Back at the table</button>
+            ) : (
+              <button className="btn btn-secondary btn-full mb-8" onClick={() => onEvent({ type: 'away', seat: seatNum })}>Away (bathroom, meal…)</button>
+            )}
+            <button className="btn btn-secondary btn-full mb-8" onClick={() => setShowMoveMenu(v => !v)}>Moved to another seat…</button>
+            {showMoveMenu && moveMenu(n => onEvent({ type: 'move', from: seatNum, to: n }))}
+            <button className="btn btn-secondary btn-full mb-8" style={{ color: 'var(--text2)' }} onClick={() => onEvent({ type: 'left', seat: seatNum })}>
+              Left — seat is empty
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -171,40 +120,35 @@ function SeatEditSheet({ seatNum, seat, isMySeat, totalSeats, sym, onSave, onMov
 
 function SeatGrid({ session, onSeatTap }) {
   const { seats = [], mySeat, totalSeats } = session;
+  const sym = currencySymbol(session.currency);
   return (
     <div className="session-seat-grid">
       {Array.from({ length: totalSeats }, (_, i) => i + 1).map(n => {
         const seat = seats.find(s => s.seatNum === n) || {};
         const isMe = n === mySeat;
-        const isLeft = seat.status === 'left';
-        const hasData = isMe || seat.name || seat.estimatedStack || (seat.tags || []).length > 0;
-
+        const status = isMe ? 'active' : (seat.status || 'active');
         return (
           <button
             key={n}
-            className={`session-seat-card${isMe ? ' ssc-me' : ''}${isLeft ? ' ssc-left' : ''}${!hasData ? ' ssc-empty' : ''}`}
+            className={`session-seat-card${isMe ? ' ssc-me' : ''}${status === 'away' ? ' ssc-away' : ''}${status === 'empty' ? ' ssc-left' : ''}`}
             onClick={() => onSeatTap(n)}
           >
             <div className="ssc-num">#{n}</div>
             <div className="ssc-name">
-              {isMe ? 'You' : (seat.name || '—')}
+              {isMe ? 'You' : status === 'empty' ? 'Empty' : (seat.name || seat.code || '—')}
             </div>
-            {seat.estimatedStack ? (
-              <div className="ssc-stack">{currencySymbol(session.currency)}{Number(seat.estimatedStack).toLocaleString()}</div>
+            {!isMe && status !== 'empty' && seat.name && seat.code && <div className="ssc-code">{seat.code}</div>}
+            {status !== 'empty' && seat.estimatedStack ? (
+              <div className="ssc-stack">{sym}{Number(seat.estimatedStack).toLocaleString()}</div>
             ) : null}
-            {(seat.tags || []).length > 0 && (
+            {status !== 'empty' && (seat.tags || []).length > 0 && (
               <div className="ssc-tags">
                 {seat.tags.map(t => (
-                  <span
-                    key={t}
-                    className="ssc-tag-dot"
-                    style={{ background: TAG_META[t]?.color }}
-                    title={TAG_META[t]?.label}
-                  />
+                  <span key={t} className="ssc-tag-dot" style={{ background: TAG_META[t]?.color }} title={TAG_META[t]?.label} />
                 ))}
               </div>
             )}
-            {isLeft && <div className="ssc-left-pill">Left</div>}
+            {status === 'away' && <div className="ssc-left-pill ssc-away-pill">Away</div>}
           </button>
         );
       })}
@@ -221,7 +165,10 @@ export default function SessionView() {
 
   useEffect(() => {
     async function load() {
-      const s = await get('sessions', id);
+      const raw = await get('sessions', id);
+      // Older sessions: every seat present, occupied seats get a code (A, B, C…).
+      const s = raw ? ensureSeatCodes(raw) : raw;
+      if (raw && JSON.stringify(s.seats) !== JSON.stringify(raw.seats)) await put('sessions', s);
       setSession(s);
       const h = await getHandsBySession(id);
       setHands(h.sort((a, b) => (a.handNum || 0) - (b.handNum || 0)));
@@ -234,41 +181,20 @@ export default function SessionView() {
     setHands(prev => prev.filter(h => h.id !== draftId));
   }
 
-  async function handleSeatSave(seatNum, patch) {
-    const existing = session.seats || [];
-    let found = false;
-    const updatedSeats = existing.map(s => {
-      if (s.seatNum === seatNum) { found = true; return { ...s, ...patch }; }
-      return s;
-    });
-    if (!found) updatedSeats.push({ seatNum, ...patch });
-    const updated = { ...session, seats: updatedSeats };
+  async function saveSession(updated) {
     await put('sessions', updated);
     setSession(updated);
+  }
+
+  async function handleSaveDetails(seatNum, patch) {
+    const seats = (session.seats || []).map(x => (x.seatNum === seatNum ? { ...x, ...patch } : x));
+    await saveSession({ ...session, seats });
     setEditingSeat(null);
   }
 
-  async function handleMovePlayer(fromSeat, toSeat) {
-    const existing = session.seats || [];
-    const fromData = existing.find(s => s.seatNum === fromSeat) || {};
-    const blank = { name: '', tags: [], estimatedStack: '', status: 'active' };
-    let toFound = false, fromFound = false;
-    const updatedSeats = existing.map(s => {
-      if (s.seatNum === fromSeat) { fromFound = true; return { ...s, ...blank }; }
-      if (s.seatNum === toSeat) { toFound = true; return { ...s, name: fromData.name || '', tags: fromData.tags || [], estimatedStack: fromData.estimatedStack || '', status: 'active' }; }
-      return s;
-    });
-    if (!fromFound) updatedSeats.push({ seatNum: fromSeat, ...blank });
-    if (!toFound) updatedSeats.push({ seatNum: toSeat, name: fromData.name || '', tags: fromData.tags || [], estimatedStack: fromData.estimatedStack || '', status: 'active' });
-    const updated = { ...session, seats: updatedSeats };
-    await put('sessions', updated);
-    setSession(updated);
-  }
-
-  async function handleMoveMySeat(toSeat) {
-    const updated = { ...session, mySeat: toSeat };
-    await put('sessions', updated);
-    setSession(updated);
+  async function handleSeatEvent(event) {
+    await saveSession(applySeatEvent(session, event));
+    setEditingSeat(null);
   }
 
   if (!session) return <div className="screen"><div className="text-muted">Loading…</div></div>;
@@ -334,6 +260,17 @@ export default function SessionView() {
       {/* Live table — tap any seat to edit */}
       <div className="section-label">Table</div>
       <SeatGrid session={session} onSeatTap={setEditingSeat} />
+      {(session.seatLog || []).length > 0 && (
+        <details className="seat-log">
+          <summary>Table log ({session.seatLog.length})</summary>
+          {[...session.seatLog].reverse().map((e, i) => (
+            <div key={i} className="seat-log-row">
+              <span className="text-muted">{new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <span>{describeSeatEvent(e)}</span>
+            </div>
+          ))}
+        </details>
+      )}
 
       <div className="divider" />
 
@@ -392,14 +329,14 @@ export default function SessionView() {
 
       {editingSeat !== null && (
         <SeatEditSheet
+          key={editingSeat}
           seatNum={editingSeat}
           seat={editingSeatData}
           isMySeat={editingSeat === session.mySeat}
-          totalSeats={session.totalSeats}
+          session={session}
           sym={currencySymbol(session.currency)}
-          onSave={handleSeatSave}
-          onMovePlayer={handleMovePlayer}
-          onMoveMySeat={handleMoveMySeat}
+          onSaveDetails={handleSaveDetails}
+          onEvent={handleSeatEvent}
           onClose={() => setEditingSeat(null)}
         />
       )}

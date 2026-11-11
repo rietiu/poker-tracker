@@ -1542,3 +1542,17 @@ h3 { font-size: 1rem; font-weight: 600; }
 /* ── Button-seat picker (step 0) ───────────────────────────────────────────── */
 .seat-btn-labelled { flex-direction: column; gap: 2px; line-height: 1.1; }
 .seat-sub { font-size: 0.65rem; font-weight: 600; opacity: 0.85; min-height: 0.8rem; }
+
+.seat-btn.seat-out { opacity: 0.35; border-style: dashed; cursor: default; }
+
+/* ── Table: away seats, codes, log ─────────────────────────────────────────── */
+.session-seat-card.ssc-away { opacity: 0.6; border-style: dashed; }
+.ssc-away-pill { background: rgba(244,196,48,0.18); color: var(--gold); }
+.ssc-code { font-size: 0.65rem; color: var(--text2); }
+.seat-status-banner.away-banner { background: rgba(244,196,48,0.12); color: var(--gold); }
+.seat-log { margin: 8px 0 4px; font-size: 0.85rem; }
+.seat-log summary { cursor: pointer; color: var(--text2); padding: 4px 0; }
+.seat-log-row { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+
+.seating-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 8px; padding: 4px 0; font-size: 0.9rem; }
+.seating-row.seating-me { color: var(--gold); }
