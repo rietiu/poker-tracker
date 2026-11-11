@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState, isValidBetAmount } from '../utils';
+import {
+  PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState,
+  materializeStreet, tapsFromActions, facingTap, betTap,
+} from '../utils';
 
 const POT_FRACS = [
   { label: '1/3', frac: 1 / 3 },
@@ -7,34 +10,30 @@ const POT_FRACS = [
   { label: '2/3', frac: 2 / 3 },
   { label: 'Pot', frac: 1 },
 ];
-
-// Preflop open-raise sizes (BB multiples) — 4 options
-const BB_OPEN_SIZES = [2.5, 3, 4, 5];
-// Re-raise multiples (of the current bet) — 4 options
-const RERAISE_MULTIPLES = [2.5, 3, 4, 5];
+const BB_OPEN_SIZES = [2.5, 3, 4, 5];     // pre-flop open, in BB
+const RERAISE_MULTIPLES = [2.5, 3, 4];    // facing a bet, × current bet
 
 const CURRENCY_SYMBOLS = { USD: '$', PHP: '₱', EUR: '€', GBP: '£' };
 
-// Returns a short action badge string e.g. "F", "X", "C$10", "B$30", "R$60"
-function actionBadge(action, amount) {
+function actionBadge(action, amount, sym) {
   if (action === 'fold') return 'F';
   if (action === 'check') return 'X';
-  if (action === 'call') return `C$${amount}`;
-  if (action === 'bet') return `B$${amount}`;
-  if (action === 'raise') return `R$${amount}`;
+  if (action === 'call') return `C${sym}${amount}`;
+  if (action === 'bet') return `B${sym}${amount}`;
+  if (action === 'raise') return `R${sym}${amount}`;
   return '';
 }
 
 /**
+ * Fast sequencer: tap only the seats that acted, in order. Seats skipped
+ * between taps (and every seat still due on "Done") are recorded as folds.
+ * Tap the last-tapped seat again to turn its action into a bet / raise.
+ *
  * Props:
- *   totalSeats: 6 | 8 | 9
- *   street: 'preflop' | 'flop' | 'turn' | 'river'
- *   myPosition: string
- *   activePositions: string[]   — positions still in the hand for this street
- *   actions: { pos, action, amount }[]
- *   onChange: (actions, endPot) => void
- *   startPot: number            — pot size at start of street (before any actions)
- *   bb: number
+ *   totalSeats, street, myPosition, activePositions, actions, startPot, bb, sb, currency
+ *   onChange(actions, endPot)   — stored actions for this street
+ *   onComplete(actions)         — street finished (closed actions, or hero folded)
+ *   prevPreflopActions          — previous hand's pre-flop actions ("Same as last hand")
  */
 export default function PositionSequencer({
   totalSeats,
@@ -45,151 +44,192 @@ export default function PositionSequencer({
   onChange,
   startPot = 0,
   bb = 2,
-  sb = null, // SB post amount; defaults to Math.round(bb/2) if null
+  sb = null,
   currency = 'USD',
   onComplete = null,
+  prevPreflopActions = null,
 }) {
   const sym = CURRENCY_SYMBOLS[currency] || '$';
-
-  // Round an amount to nearest whole BB
-  const roundToBB = (amount) => bb > 0 ? Math.round(amount / bb) * bb : Math.round(amount);
-
-  // Fire onComplete when nextPos transitions to null (not on mount)
-  const onCompleteRef = useRef(onComplete);
-  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
-  const hasMountedRef = useRef(false);
-  const [pendingAmount, setPendingAmount] = useState('');
-  const [showRaisePanel, setShowRaisePanel] = useState(false);
-
   const isPreflop = street === 'preflop';
-  const initialBet = isPreflop ? bb : 0;
-
-  // For preflop, seed committed amounts with blind posts so SB/BB calls are computed correctly
   const sbVal = sb != null ? sb : Math.round(bb / 2);
-  const initialCommitted = isPreflop ? { SB: sbVal, BB: bb } : {};
+  const roundToBB = (amount) => (bb > 0 ? Math.round(amount / bb) * bb : Math.round(amount));
 
   const fullOrder = isPreflop
     ? (PREFLOP_ACTION_ORDER[totalSeats] || PREFLOP_ACTION_ORDER[9])
     : (POSTFLOP_ACTION_ORDER[totalSeats] || POSTFLOP_ACTION_ORDER[9]);
-
-  // Only positions present at this table
   const actionOrder = fullOrder.filter(p => activePositions.includes(p));
 
-  const { nextPos, currentBet, runningPot, foldedSet, lastActionByPos, toCall } =
-    computeStreetState(actions, actionOrder, activePositions, initialBet, initialCommitted);
+  const ctx = {
+    actionOrder,
+    activePositions,
+    initialBet: isPreflop ? bb : 0,
+    initialCommitted: isPreflop ? { SB: sbVal, BB: bb } : {},
+    hero: myPosition,
+  };
+  const stateOf = (acts) =>
+    computeStreetState(acts, actionOrder, activePositions, ctx.initialBet, ctx.initialCommitted);
 
-  const totalPot = startPot + runningPot;
+  const taps = tapsFromActions(actions, myPosition);
+  const open = materializeStreet(taps, ctx);
+  const state = stateOf(open.actions);
+  const closed = materializeStreet(taps, { ...ctx, close: true });
+  const heroFolded = taps.some(t => t.pos === myPosition && t.action === 'fold');
+  const totalPot = startPot + state.runningPot;
+  const lastTap = taps[taps.length - 1];
 
-  // BB option logic: if preflop and nextPos === BB and no raise above BB
-  const bbCanCheck =
-    isPreflop &&
-    nextPos === 'BB' &&
-    currentBet <= bb &&
-    !actions.some(a => a.action === 'raise' || (a.action === 'bet' && a.amount > bb));
+  const [raiseFor, setRaiseFor] = useState(null);
+  const [pendingAmount, setPendingAmount] = useState('');
 
-  // Reset raise panel when next actor changes
-  useEffect(() => {
-    setShowRaisePanel(false);
-    setPendingAmount('');
-  }, [nextPos]);
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 
-  function commitAction(action, amount) {
-    if (nextPos === null) return;
-    const newActions = [...actions, { pos: nextPos, action, amount: amount || 0 }];
-    // Recompute endPot with same initialCommitted so blind posts aren't double-counted
-    const { runningPot: newRunning } = computeStreetState(
-      newActions, actionOrder, activePositions, initialBet, initialCommitted
-    );
-    onChange(newActions, startPot + newRunning);
-  }
-
-  function handleFold() { commitAction('fold', 0); }
-  function handleCheck() { commitAction('check', 0); }
-  // Store currentBet (full call price) — computeStreetState uses committed tracking to get the delta
-  function handleCall() { commitAction('call', currentBet); }
-  function handleBetRaise() {
-    setShowRaisePanel(v => !v);
-    setPendingAmount('');
-  }
-  const betAmountValid = isValidBetAmount(pendingAmount, currentBet);
-
-  function commitBetRaise() {
-    if (!betAmountValid) return;
-    const amt = Number(pendingAmount);
-    const action = currentBet > 0 ? 'raise' : 'bet';
-    commitAction(action, amt);
-    setShowRaisePanel(false);
-    setPendingAmount('');
-  }
-
-  function undoFrom(idx) {
-    const newActions = actions.slice(0, idx);
-    const { runningPot: newRunning } = computeStreetState(
-      newActions, actionOrder, activePositions, initialBet, initialCommitted
-    );
-    onChange(newActions, startPot + newRunning);
-  }
-
-  const isMe = nextPos === myPosition;
-
-  // Auto-advance: fire onComplete 1s after street is done (skip on mount)
+  // Auto-advance once the action is unambiguously closed (skip on mount).
+  const hasMountedRef = useRef(false);
+  const autoDone = taps.length > 0 && !heroFolded && !open.error && open.nextPos === null;
   useEffect(() => {
     if (!hasMountedRef.current) { hasMountedRef.current = true; return; }
-    if (nextPos !== null || actions.length === 0) return;
-    const t = setTimeout(() => onCompleteRef.current?.(), 1000);
+    if (!autoDone) return;
+    const t = setTimeout(() => onCompleteRef.current?.(open.actions), 800);
     return () => clearTimeout(t);
-  }, [nextPos]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [autoDone, taps.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Write a new tap log back as stored actions. Returns the materialised result or null.
+  function emit(newTaps, close = false) {
+    const m = materializeStreet(newTaps, { ...ctx, close });
+    if (m.error) return null;
+    onChange(m.actions, startPot + stateOf(m.actions).runningPot);
+    return m;
+  }
+
+  function canTap(pos) {
+    if (heroFolded) return false;
+    return !materializeStreet([...taps, { pos, action: 'check', amount: 0 }], ctx).error;
+  }
+
+  function handleTileTap(pos) {
+    if (lastTap && lastTap.pos === pos && lastTap.action !== 'fold') {
+      setRaiseFor(raiseFor === pos ? null : pos);
+      setPendingAmount('');
+      return;
+    }
+    if (!canTap(pos)) return;
+    setRaiseFor(null);
+    emit([...taps, facingTap(taps, pos, ctx)]);
+  }
+
+  // Bet / raise replaces the last tap (which belongs to raiseFor).
+  const tapsBeforeRaise = taps.slice(0, -1);
+  const raiseBase = raiseFor ? stateOf(materializeStreet(tapsBeforeRaise, ctx).actions) : null;
+  const pendingTap = raiseFor ? betTap(tapsBeforeRaise, raiseFor, pendingAmount, ctx) : null;
+
+  function commitBet(amount) {
+    const t = betTap(tapsBeforeRaise, raiseFor, amount, ctx);
+    if (!t) return;
+    setRaiseFor(null);
+    setPendingAmount('');
+    emit([...tapsBeforeRaise, t]);
+  }
+
+  function undo() {
+    setRaiseFor(null);
+    emit(taps.slice(0, -1));
+  }
+
+  function heroFold() {
+    setRaiseFor(null);
+    const m = emit([...taps, { pos: myPosition, action: 'fold', amount: 0 }]);
+    if (m) onCompleteRef.current?.(m.actions);
+  }
+
+  function done() {
+    setRaiseFor(null);
+    const m = emit(taps, true);
+    if (m) onCompleteRef.current?.(m.actions);
+  }
+
+  // "Same as last hand": longest valid prefix of the previous hand's taps.
+  const prevTaps = (() => {
+    if (!isPreflop || taps.length > 0 || !prevPreflopActions?.length) return null;
+    const candidate = tapsFromActions(prevPreflopActions, null)
+      .filter(t => t.action !== 'fold' && actionOrder.includes(t.pos));
+    let best = [];
+    for (let i = 1; i <= candidate.length; i++) {
+      if (materializeStreet(candidate.slice(0, i), ctx).error) break;
+      best = candidate.slice(0, i);
+    }
+    return best.length ? best : null;
+  })();
+
+  function sizeChips() {
+    if (!raiseBase) return [];
+    const base = raiseBase.currentBet;
+    if (isPreflop && base <= bb) {
+      return BB_OPEN_SIZES.map(m => ({ label: `${m}bb`, amt: Math.round(m * bb) }));
+    }
+    if (base > 0) {
+      return RERAISE_MULTIPLES.map(m => {
+        const amt = roundToBB(base * m);
+        return { label: `${m}x · ${(amt / bb).toFixed(1).replace(/\.0$/, '')}bb`, amt };
+      });
+    }
+    const potBefore = startPot + raiseBase.runningPot;
+    return POT_FRACS.map(({ label, frac }) => ({ label, amt: Math.max(bb, roundToBB(potBefore * frac)) }));
+  }
+
+  const heroCanAct = canTap(myPosition);
+  const doneLabel = closed.error === 'hero-skipped' ? 'Your action first' : 'Done →';
 
   return (
     <div className="pos-sequencer">
-      {/* Pot bar */}
       <div className="pos-pot-bar">
         <span>Pot <strong>{sym}{totalPot.toLocaleString()}</strong></span>
-        {toCall > 0 && nextPos && (
-          <span className="text-muted text-sm"> · Call {sym}{toCall.toLocaleString()}</span>
+        {state.nextPos && state.toCall > 0 && (
+          <span className="text-muted text-sm"> · To call {sym}{state.toCall.toLocaleString()}</span>
         )}
       </div>
 
-      {/* Position grid */}
+      <div className="seq-hint text-muted text-xs">
+        Tap seats that acted, in order — untapped seats fold. Tap the last seat again to bet / raise.
+      </div>
+
       <div className="pos-grid">
-        {actionOrder.map((pos) => {
-          const act = lastActionByPos[pos];
-          const isFolded = foldedSet.has(pos);
-          const isActive = pos === nextPos;
-          const isMyPos = pos === myPosition;
+        {actionOrder.map(pos => {
+          const act = state.lastActionByPos[pos];
+          const tapped = taps.some(t => t.pos === pos);
+          const isFolded = state.foldedSet.has(pos);
+          const implied = isFolded && !tapped;
+          const isNext = pos === state.nextPos;
+          const isMe = pos === myPosition;
+          const isLast = lastTap?.pos === pos && lastTap.action !== 'fold';
+          const enabled = isLast || canTap(pos);
           const posColor = POSITION_COLORS[pos] || '#adb5bd';
-
-          // Find action index for undo
-          const lastActIdx = actions.map(a => a.pos).lastIndexOf(pos);
-
           return (
             <button
               key={pos}
               className={
                 'pos-tile' +
-                (isActive ? ' pos-active' : '') +
-                (isMyPos ? ' pos-me' : '') +
-                (isFolded ? ' pos-folded' : '')
+                (isNext ? ' pos-active' : '') +
+                (isMe ? ' pos-me' : '') +
+                (isFolded ? ' pos-folded' : '') +
+                (implied ? ' pos-implied' : '') +
+                (raiseFor === pos ? ' pos-raising' : '')
               }
-              onClick={() => lastActIdx !== -1 && undoFrom(lastActIdx)}
-              disabled={lastActIdx === -1}
-              style={isActive ? { borderColor: posColor, boxShadow: `0 0 0 2px ${posColor}44` } : isMyPos ? { borderColor: '#f4c430' } : {}}
+              onClick={() => handleTileTap(pos)}
+              disabled={!enabled}
+              style={isNext ? { borderColor: posColor, boxShadow: `0 0 0 2px ${posColor}44` } : isMe ? { borderColor: '#f4c430' } : {}}
             >
-              <span className="pos-tile-name" style={{ color: isActive ? posColor : undefined }}>
-                {pos}
-              </span>
-              {isMyPos && <span className="pos-tile-me">You</span>}
+              <span className="pos-tile-name" style={{ color: isNext ? posColor : undefined }}>{pos}</span>
+              {isMe && <span className="pos-tile-me">You</span>}
               {act && (
                 <span
                   className={
                     'pos-tile-action' +
                     (act.action === 'fold' ? ' act-fold' :
                      act.action === 'check' ? ' act-check' :
-                     act.action === 'call' ? ' act-call' :
-                     ' act-bet')
+                     act.action === 'call' ? ' act-call' : ' act-bet')
                   }
                 >
-                  {actionBadge(act.action, act.amount)}
+                  {actionBadge(act.action, act.amount, sym)}
                 </span>
               )}
             </button>
@@ -197,131 +237,57 @@ export default function PositionSequencer({
         })}
       </div>
 
-      {/* Action panel */}
-      {nextPos !== null && (
-        <div className="pos-action-panel">
-          <div className="pos-action-who">
-            {isMe ? 'Your action' : `${nextPos} acts`}
+      {raiseFor && (
+        <div className="pos-raise-panel">
+          <div className="text-sm mb-8">
+            {raiseFor === myPosition ? 'Your' : raiseFor} {raiseBase.currentBet > 0 ? 'raise to' : 'bet'}
           </div>
-          <div className="pos-action-btns">
-            <button className="pos-btn pos-fold" onClick={handleFold}>Fold</button>
-
-            {(currentBet === 0 || bbCanCheck) ? (
-              <button className="pos-btn pos-check" onClick={handleCheck}>Check</button>
-            ) : (
-              <button className="pos-btn pos-call" onClick={handleCall}>
-                Call {sym}{toCall.toLocaleString()}
+          <div className="pot-size-row">
+            {sizeChips().map(({ label, amt }) => (
+              <button key={label} className="pot-size-btn" onClick={() => commitBet(amt)}>
+                <span className="pot-size-label">{label}</span>
+                <span className="pot-size-amt">{sym}{amt.toLocaleString()}</span>
               </button>
-            )}
-
-            <button
-              className={'pos-btn pos-raise' + (showRaisePanel ? ' active' : '')}
-              onClick={handleBetRaise}
-            >
-              {currentBet > 0 ? 'Raise' : 'Bet'}
+            ))}
+          </div>
+          <div className="row gap-8 mt-8">
+            <input
+              type="number"
+              className="form-input"
+              placeholder={`Amount ${sym}`}
+              value={pendingAmount}
+              onChange={e => setPendingAmount(e.target.value)}
+              inputMode="numeric"
+              style={{ flex: 1 }}
+            />
+            <button className="btn btn-primary btn-sm" disabled={!pendingTap} style={{ opacity: pendingTap ? 1 : 0.5 }} onClick={() => commitBet(pendingAmount)}>
+              OK
             </button>
           </div>
-
-          {showRaisePanel && (
-            <div className="pos-raise-panel">
-              {isPreflop ? (
-                // Preflop: BB-based sizing
-                <div className="pot-size-row mt-8">
-                  {currentBet > bb
-                    // Facing a raise — show multiples of current bet + total BBs
-                    ? RERAISE_MULTIPLES.map(m => {
-                        const amt = roundToBB(Math.round(currentBet * m));
-                        const bbAmt = (amt / bb).toFixed(1).replace(/\.0$/, '');
-                        const isSel = pendingAmount === String(amt);
-                        return (
-                          <button key={m} className={'pot-size-btn' + (isSel ? ' selected' : '')} onClick={() => setPendingAmount(String(amt))}>
-                            <span className="pot-size-label">{m}x · {bbAmt}bb</span>
-                            <span className="pot-size-amt">{sym}{amt.toLocaleString()}</span>
-                          </button>
-                        );
-                      })
-                    // Open raise — show BB multiples
-                    : BB_OPEN_SIZES.map(m => {
-                        const amt = Math.round(m * bb);
-                        const isSel = pendingAmount === String(amt);
-                        return (
-                          <button key={m} className={'pot-size-btn' + (isSel ? ' selected' : '')} onClick={() => setPendingAmount(String(amt))}>
-                            <span className="pot-size-label">{m}bb</span>
-                            <span className="pot-size-amt">{sym}{amt.toLocaleString()}</span>
-                          </button>
-                        );
-                      })
-                  }
-                </div>
-              ) : (
-                // Postflop: pot fraction sizing
-                totalPot > 0 && (
-                  <div className="pot-size-row mt-8">
-                    {POT_FRACS.map(({ label, frac }) => {
-                      const amt = roundToBB(totalPot * frac);
-                      const isSel = pendingAmount === String(amt);
-                      return (
-                        <button key={label} className={'pot-size-btn' + (isSel ? ' selected' : '')} onClick={() => setPendingAmount(String(amt))}>
-                          <span className="pot-size-label">{label}</span>
-                          <span className="pot-size-amt">{sym}{amt.toLocaleString()}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )
-              )}
-              {/* BB nudge buttons (preflop) */}
-              {isPreflop && (
-                <div className="bb-nudge-row mt-8">
-                  {[-1, -0.5, +0.5, +1].map(d => (
-                    <button
-                      key={d}
-                      className="bb-nudge-btn"
-                      onClick={() => {
-                        const cur = Number(pendingAmount) || 0;
-                        const next = Math.max(0, cur + d * bb);
-                        setPendingAmount(String(Math.round(next)));
-                      }}
-                    >
-                      {d > 0 ? '+' : ''}{d}bb
-                    </button>
-                  ))}
-                </div>
-              )}
-              <input
-                type="number"
-                className="form-input mt-8"
-                placeholder={`Amount ${sym}`}
-                value={pendingAmount}
-                onChange={e => setPendingAmount(e.target.value)}
-                inputMode="numeric"
-              />
-              {pendingAmount !== '' && !betAmountValid && (
-                <div className="text-xs mt-4 result-lost">
-                  {currentBet > 0
-                    ? `Raise must be more than ${sym}${currentBet.toLocaleString()}`
-                    : 'Bet must be more than 0'}
-                </div>
-              )}
-              <button
-                className="btn btn-primary btn-full mt-8"
-                onClick={commitBetRaise}
-                disabled={!betAmountValid}
-                style={{ opacity: betAmountValid ? 1 : 0.5 }}
-              >
-                {currentBet > 0 ? 'Raise' : 'Bet'}
-                {pendingAmount ? ` ${sym}${Number(pendingAmount).toLocaleString()}` : ''}
-              </button>
+          {pendingAmount !== '' && !pendingTap && (
+            <div className="text-xs mt-4 result-lost">
+              {raiseBase.currentBet > 0
+                ? `Raise must be more than ${sym}${raiseBase.currentBet.toLocaleString()}`
+                : 'Bet must be more than 0'}
             </div>
           )}
         </div>
       )}
 
-      {nextPos === null && actions.length > 0 && (
-        <div className="seq-done">
-          Street complete — Pot: {sym}{totalPot.toLocaleString()}
-        </div>
-      )}
+      <div className="seq-controls">
+        {prevTaps && (
+          <button className="btn btn-secondary btn-sm" onClick={() => emit(prevTaps)}>Same as last hand</button>
+        )}
+        <button className="btn btn-secondary btn-sm" onClick={undo} disabled={taps.length === 0} style={{ opacity: taps.length ? 1 : 0.5 }}>
+          ↶ Undo
+        </button>
+        {!heroFolded && heroCanAct && (
+          <button className="btn btn-secondary btn-sm seq-fold" onClick={heroFold}>I fold</button>
+        )}
+        <button className="btn btn-primary btn-sm" onClick={done} disabled={!!closed.error || heroFolded} style={{ opacity: closed.error || heroFolded ? 0.5 : 1 }}>
+          {doneLabel}
+        </button>
+      </div>
     </div>
   );
 }

@@ -1413,3 +1413,16 @@ h3 { font-size: 1rem; font-weight: 600; }
   margin-top: 2px;
   white-space: nowrap;
 }
+
+/* ── Fast sequencer ─────────────────────────────────────────────────────────── */
+.seq-hint { margin: 4px 0 8px; line-height: 1.35; }
+.pos-tile.pos-implied { opacity: 0.35; }
+.pos-tile.pos-raising { border-color: var(--gold) !important; box-shadow: 0 0 0 2px rgba(244,196,48,0.35) !important; }
+.seq-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.seq-controls .btn { flex: 1 1 auto; min-height: 44px; }
+.seq-controls .seq-fold { color: var(--red-light); border-color: rgba(231,76,60,0.4); }
