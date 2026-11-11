@@ -1515,3 +1515,26 @@ h3 { font-size: 1rem; font-weight: 600; }
 }
 .blind-field .form-input { padding-left: 46px; width: 100%; }
 .blind-slash { padding-bottom: 12px; color: var(--text2); font-size: 1.2rem; }
+
+/* ── Session profiles ───────────────────────────────────────────────────────── */
+.profile-list { display: flex; flex-direction: column; gap: 8px; }
+.profile-card {
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  color: var(--text);
+  cursor: pointer;
+}
+.profile-card.selected { border-color: var(--green); box-shadow: 0 0 0 2px rgba(45,106,79,0.45); }
+.profile-card.profile-new { text-align: center; color: var(--accent); font-weight: 600; }
+.profile-title { font-weight: 600; }
+.profile-meta { font-size: 0.8rem; color: var(--text2); margin-top: 2px; }
+.profile-picked {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--green);
+  border-radius: var(--radius);
+  background: rgba(45,106,79,0.12);
+}

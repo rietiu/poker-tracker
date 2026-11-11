@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { put, getSessionsSorted } from '../db';
-import { uuid, CURRENCIES, currencySymbol, recentValues, recentGames, buildGame, formatGame } from '../utils';
+import { uuid, CURRENCIES, currencySymbol, recentValues, recentGames, buildGame, formatGame, sessionProfiles, profileSummary } from '../utils';
 import { rakeProfileFor } from '../pots';
 
 const SEAT_COUNTS = [6, 8, 9];
@@ -64,7 +64,9 @@ export default function SessionSetup() {
   const [rakeEdited, setRakeEdited] = useState(false); // user typed rake fields → don't auto-fill over them
   const [rakeSource, setRakeSource] = useState('');    // e.g. "Okada · NL ₱25/₱50" when auto-filled
   const [allSessions, setAllSessions] = useState([]);
-  const pastSessions = allSessions.slice(0, 5);
+  const [profileKey, setProfileKey] = useState('');    // picked profile
+  const [showDetails, setShowDetails] = useState(false); // profile picked → settings collapsed unless "Change"
+  const [showAllProfiles, setShowAllProfiles] = useState(false);
 
   useEffect(() => {
     getSessionsSorted().then(all => {
@@ -131,15 +133,35 @@ export default function SessionSetup() {
 
   const editRake = (setter) => (e) => { setter(e.target.value); setRakeEdited(true); setRakeSource(''); };
 
-  function applyPreset(s) {
-    if (s.venue) setVenue(s.venue);
-    if (s.game) setGame(formatGame(s.game, s.currency || 'USD'));
+  // ── Profiles: every venue + level played, with its latest settings ─────────
+  const profiles = sessionProfiles(allSessions);
+  const visibleProfiles = showAllProfiles ? profiles : profiles.slice(0, 5);
+  const selectedProfile = profiles.find(p => p.key === profileKey) || null;
+  const collapsed = !!selectedProfile && !showDetails;
+
+  function applyProfile(p) {
+    setVenue(p.venue);
+    setCurrency(p.currency);
+    setGame(p.game);
     setEnteringNew(false);
-    if (s.currency) setCurrency(s.currency);
-    if (s.totalSeats) setTotalSeats(s.totalSeats);
-    applyRakeProfile({ rakeType: s.rakeType || 'percent', rake: s.rake, rakeMax: s.rakeMax || 0, jackpot: s.jackpot || 0 });
+    setTotalSeats(p.totalSeats);
+    setMySeat(seat => Math.min(seat, p.totalSeats));
+    applyRakeProfile(p);
     setRakeEdited(false);
-    setRakeSource(s.rake != null ? `${(s.venue || '').trim()} · ${(s.game || '').trim()}` : '');
+    setRakeSource('');
+    setProfileKey(p.key);
+    setShowDetails(false);
+  }
+
+  function startNewProfile() {
+    setProfileKey('');
+    setShowDetails(true);
+    setVenue('');
+    setEnteringNew(true);
+    setNewBlinds({ type: 'NL', sb: '', bb: '', bbAuto: true });
+    applyRakeProfile({ rakeType: 'percent', rake: null, rakeMax: 0, jackpot: 0 });
+    setRakeEdited(false);
+    setRakeSource('');
   }
 
   async function handleStart() {
@@ -179,23 +201,41 @@ export default function SessionSetup() {
         <h1>New Session</h1>
       </div>
 
-      {pastSessions.length > 0 && (
+      {profiles.length > 0 && (
         <div className="form-group">
-          <label className="form-label">Quick-start from previous</label>
-          <div className="preset-scroll">
-            {pastSessions.map(s => (
+          <label className="form-label">Pick a profile</label>
+          <div className="profile-list">
+            {visibleProfiles.map(p => (
               <button
-                key={s.id}
-                className="preset-card"
-                onClick={() => applyPreset(s)}
+                key={p.key}
+                className={'profile-card' + (p.key === profileKey ? ' selected' : '')}
+                onClick={() => (p.key === profileKey ? setProfileKey('') : applyProfile(p))}
               >
-                <div className="preset-venue">{s.venue || 'Unnamed'}</div>
-                <div className="preset-meta">{formatGame(s.game, s.currency || 'USD')} · {s.totalSeats}-max</div>
+                <div className="profile-title">{p.venue || 'No venue'} · {p.game}</div>
+                <div className="profile-meta">{profileSummary(p)}</div>
               </button>
             ))}
+            {profiles.length > 5 && !showAllProfiles && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAllProfiles(true)}>Show all {profiles.length}</button>
+            )}
+            <button className={'profile-card profile-new' + (!profileKey && showDetails ? ' selected' : '')} onClick={startNewProfile}>
+              + New place or level
+            </button>
           </div>
         </div>
       )}
+
+      {collapsed && (
+        <div className="profile-picked mb-16">
+          <div>
+            <div className="profile-title">{selectedProfile.venue || 'No venue'} · {selectedProfile.game}</div>
+            <div className="profile-meta">{profileSummary(selectedProfile)}</div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowDetails(true)}>Change</button>
+        </div>
+      )}
+
+      {!collapsed && (<>
 
       <div className="form-group">
         <label className="form-label">Currency</label>
@@ -306,6 +346,8 @@ export default function SessionSetup() {
         </div>
       </div>
 
+      </>)}
+
       <div className="form-group">
         <label className="form-label">My Seat</label>
         <div className="seat-grid">
@@ -333,6 +375,7 @@ export default function SessionSetup() {
         />
       </div>
 
+      {!collapsed && (<>
       <div className="form-group">
         <label className="form-label">Commission / Rake <span className="text-muted text-xs">(optional)</span></label>
         {rakeSource && (
@@ -378,6 +421,8 @@ export default function SessionSetup() {
         />
         <div className="text-muted text-xs mt-4">No rake or jackpot when the hand ends before the flop.</div>
       </div>
+
+      </>)}
 
       <div style={{ paddingBottom: 24 }}>
         <button className="btn btn-primary btn-full" onClick={handleStart} disabled={!effectiveGame} style={{ opacity: effectiveGame ? 1 : 0.5 }}>
