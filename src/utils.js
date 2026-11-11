@@ -162,6 +162,33 @@ export function formatTotals(totals) {
   return codes.map(c => formatSigned(totals[c], c)).join(' · ');
 }
 
+// ── Game / blinds label ───────────────────────────────────────────────────────
+// Blinds are always shown with the session's currency symbol, whatever was
+// typed (e.g. "NL P25/P50" for pesos → "NL ₱25/₱50").
+export function buildGame(type, sb, bb, currency) {
+  if (sb === '' || bb === '' || sb == null || bb == null) return '';
+  const n1 = Number(sb), n2 = Number(bb);
+  if (!(n1 > 0) || !(n2 > 0)) return '';
+  const sym = currencySymbol(currency);
+  const f = (n) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return `${type || 'NL'} ${sym}${f(n1)}/${sym}${f(n2)}`;
+}
+
+export function formatGame(game, currency) {
+  const g = (game || '').trim();
+  const blinds = parseBlinds(g);
+  if (!blinds) return g;
+  const m = g.match(/^\s*(PLO|NLH|NL|PL|FL|LHE)\b/i);
+  const type = m ? (m[1].toUpperCase() === 'NLH' ? 'NL' : m[1].toUpperCase()) : 'NL';
+  return buildGame(type, blinds.sb, blinds.bb, currency);
+}
+
+// Blind levels played in `currency`, most recent first, one per level.
+export function recentGames(sessions, currency) {
+  const shown = (sessions || []).map(s => ({ ...s, game: formatGame(s.game, s.currency || 'USD') }));
+  return recentValues(shown, 'game', s => (s.currency || 'USD') === currency);
+}
+
 export function getSbSeat(buttonSeat, totalSeats) {
   return (buttonSeat % totalSeats) + 1;
 }

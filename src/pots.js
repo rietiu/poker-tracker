@@ -1,5 +1,5 @@
 // Pots, side pots and rake — pure helpers over a hand's recorded actions.
-import { computeStreetState } from './utils.js';
+import { computeStreetState, formatGame } from './utils.js';
 
 const STREETS = ['preflop', 'flop', 'turn', 'river'];
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -118,7 +118,8 @@ export function rakeProfileFor(sessions, venue, game) {
   const v = norm(venue), g = norm(game);
   if (!v || !g) return null;
   const match = (sessions || [])
-    .filter(s => norm(s.venue) === v && norm(s.game) === g && s.rake != null)
+    .filter(s => norm(s.venue) === v && s.rake != null &&
+      (norm(s.game) === g || norm(formatGame(s.game, s.currency || 'USD')) === g))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
   if (!match) return null;
   return {
