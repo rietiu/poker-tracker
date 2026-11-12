@@ -47,6 +47,6 @@ describe('recentGames — one option per level, shown with the right symbol', ()
 describe('rake profile matches old "P" spelling of the same level', () => {
   it('finds the old NL P25/P50 session for NL ₱25/₱50', () => {
     const sessions = [{ venue: 'Okada', game: 'NL P25/P50', currency: 'PHP', createdAt: '2026-11-01T00:00:00Z', rakeType: 'percent', rake: 5, rakeMax: 300, jackpot: 20 }];
-    expect(rakeProfileFor(sessions, 'Okada', 'NL ₱25/₱50')).toEqual({ rakeType: 'percent', rake: 5, rakeMax: 300, jackpot: 20 });
+    expect(rakeProfileFor(sessions, 'Okada', 'NL ₱25/₱50')).toEqual({ rakeType: 'percent', rake: 5, rakeMax: 300, jackpot: 20, rakeRoundUnit: 0, rakeRoundMode: 'nearest' });
   });
 });

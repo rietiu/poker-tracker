@@ -77,7 +77,9 @@ export function buildPots(contributions, folded) {
   return { pots, uncalled };
 }
 
-// cfg: { rakeType: 'percent' | 'flat', rake, rakeMax, jackpot } (session settings).
+// cfg: { rakeType: 'percent' | 'flat', rake, rakeMax, jackpot, rakeRoundUnit, rakeRoundMode }.
+// Percent rake can be rounded in steps, e.g. 10% taken as ₱100 per full ₱1,000
+// (unit 100, 'down') or 5% rounded to the nearest ₱25 (unit 25, 'nearest').
 export function computeRake(calledPot, preflopOnly, cfg) {
   const none = { rake: 0, jackpot: 0, total: 0 };
   if (!cfg || preflopOnly || !(calledPot > 0)) return none;
@@ -85,7 +87,14 @@ export function computeRake(calledPot, preflopOnly, cfg) {
   const r = Number(cfg.rake) || 0;
   if (r > 0) {
     if ((cfg.rakeType || 'flat') === 'percent') {
-      rake = Math.round(calledPot * r / 100);
+      const raw = calledPot * r / 100;
+      const unit = Number(cfg.rakeRoundUnit) || 0;
+      if (unit > 0) {
+        const steps = raw / unit + 1e-9; // guard float noise (e.g. 2.4999999)
+        rake = (cfg.rakeRoundMode === 'down' ? Math.floor(steps) : Math.floor(steps + 0.5)) * unit;
+      } else {
+        rake = Math.round(raw);
+      }
       if (Number(cfg.rakeMax) > 0) rake = Math.min(rake, Number(cfg.rakeMax));
     } else {
       rake = r;
@@ -127,5 +136,7 @@ export function rakeProfileFor(sessions, venue, game) {
     rake: match.rake,
     rakeMax: match.rakeMax || 0,
     jackpot: match.jackpot || 0,
+    rakeRoundUnit: match.rakeRoundUnit || 0,
+    rakeRoundMode: match.rakeRoundMode || 'nearest',
   };
 }

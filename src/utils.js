@@ -337,6 +337,8 @@ export function sessionProfiles(sessions) {
       rake: s.rake ?? null,
       rakeMax: s.rakeMax || 0,
       jackpot: s.jackpot || 0,
+      rakeRoundUnit: s.rakeRoundUnit || 0,
+      rakeRoundMode: s.rakeRoundMode || 'nearest',
       lastUsed: s.createdAt,
       timesPlayed: 1,
     });
@@ -352,6 +354,10 @@ export function profileSummary(p) {
     parts.push('no rake');
   } else if ((p.rakeType || 'percent') === 'percent') {
     parts.push(`${p.rake}% ${Number(p.rakeMax) > 0 ? `cap ${sym}${Number(p.rakeMax).toLocaleString('en-US')}` : 'no cap'}`);
+    if (Number(p.rakeRoundUnit) > 0) {
+      const unit = `${sym}${Number(p.rakeRoundUnit).toLocaleString('en-US')}`;
+      parts.push(p.rakeRoundMode === 'down' ? `per ${unit} down` : `nearest ${unit}`);
+    }
   } else {
     parts.push(`${sym}${Number(p.rake).toLocaleString('en-US')} flat`);
   }

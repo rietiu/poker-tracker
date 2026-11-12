@@ -104,7 +104,7 @@ describe('rakeProfileFor', () => {
     { venue: 'Okada', game: 'NL ₱50/₱100', createdAt: '2026-11-05T10:00:00Z', rakeType: 'percent', rake: 5, rakeMax: 600, jackpot: 50 },
   ];
   it('latest session with the same venue + game (case / space insensitive)', () => {
-    expect(rakeProfileFor(sessions, 'OKADA', 'NL ₱25/₱50')).toEqual({ rakeType: 'percent', rake: 5, rakeMax: 400, jackpot: 25 });
+    expect(rakeProfileFor(sessions, 'OKADA', 'NL ₱25/₱50')).toEqual({ rakeType: 'percent', rake: 5, rakeMax: 400, jackpot: 25, rakeRoundUnit: 0, rakeRoundMode: 'nearest' });
   });
   it('different stakes at the same venue have their own settings', () => {
     expect(rakeProfileFor(sessions, 'Okada', 'NL ₱50/₱100').rakeMax).toBe(600);
