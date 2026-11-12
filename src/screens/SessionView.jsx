@@ -229,7 +229,7 @@ export default function SessionView() {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className={netResult >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(netResult, session.currency)}</div>
-          <div className="text-muted text-xs">{completedHands.length} hands</div>
+          <div className="text-muted text-xs">{completedHands.length} recorded {completedHands.length === 1 ? 'hand' : 'hands'}</div>
         </div>
       </div>
 

@@ -61,6 +61,8 @@ export default function SessionSetup() {
   const [rake, setRake] = useState('');
   const [rakeMax, setRakeMax] = useState('');
   const [jackpot, setJackpot] = useState('');
+  const [rakeRoundUnit, setRakeRoundUnit] = useState('');     // '' = no rounding
+  const [rakeRoundMode, setRakeRoundMode] = useState('nearest'); // 'nearest' | 'down'
   const [rakeEdited, setRakeEdited] = useState(false); // user typed rake fields → don't auto-fill over them
   const [rakeSource, setRakeSource] = useState('');    // e.g. "Okada · NL ₱25/₱50" when auto-filled
   const [allSessions, setAllSessions] = useState([]);
@@ -84,6 +86,8 @@ export default function SessionSetup() {
     setRake(p.rake != null ? String(p.rake) : '');
     setRakeMax(p.rakeMax ? String(p.rakeMax) : '');
     setJackpot(p.jackpot ? String(p.jackpot) : '');
+    setRakeRoundUnit(p.rakeRoundUnit ? String(p.rakeRoundUnit) : '');
+    setRakeRoundMode(p.rakeRoundMode || 'nearest');
   }
 
   // Rake depends on venue + stakes: fill from the last session at the same place and level.
@@ -189,6 +193,8 @@ export default function SessionSetup() {
       rake: rake !== '' ? Number(rake) : null,
       rakeMax: rakeMax !== '' ? Number(rakeMax) : 0,
       jackpot: jackpot !== '' ? Number(jackpot) : 0,
+      rakeRoundUnit: rakeRoundUnit !== '' ? Number(rakeRoundUnit) : 0,
+      rakeRoundMode,
       myStack: Number(myStack) || 0,
       mySeat,
       seats: seatArr,
@@ -413,6 +419,37 @@ export default function SessionSetup() {
             />
           )}
         </div>
+        {rakeType === 'percent' && (
+          <div className="rake-round mt-8">
+            <span className="text-muted text-sm">Rounded</span>
+            <div className="pill-group">
+              {[['nearest', 'Nearest'], ['down', 'Down']].map(([m, label]) => (
+                <button
+                  key={m}
+                  className={'pill pill-sm' + (rakeRoundMode === m ? ' selected' : '')}
+                  onClick={() => { setRakeRoundMode(m); setRakeEdited(true); setRakeSource(''); }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="text-muted text-sm">to</span>
+            <input
+              type="number"
+              className="form-input"
+              placeholder="1"
+              value={rakeRoundUnit}
+              onChange={editRake(setRakeRoundUnit)}
+              inputMode="numeric"
+              style={{ width: 80 }}
+            />
+          </div>
+        )}
+        {rakeType === 'percent' && (
+          <div className="text-muted text-xs mt-4">
+            {`e.g. 10% as ${currencySymbol(currency)}100 per full ${currencySymbol(currency)}1,000 → Down to 100 · 5% to the nearest ${currencySymbol(currency)}25 → Nearest to 25 · leave empty if unsure`}
+          </div>
+        )}
       </div>
 
       <div className="form-group">

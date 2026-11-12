@@ -48,6 +48,7 @@ export default function Home() {
       </div>
       {Object.keys(totals).length > 0 && (
         <div className="currency-totals">
+          <span className="currency-totals-label">Recorded hands</span>
           {Object.entries(totals).map(([code, v]) => (
             <span key={code} className={'currency-total ' + (v >= 0 ? 'result-won' : 'result-lost')}>
               {formatSigned(v, code)}
@@ -79,7 +80,7 @@ export default function Home() {
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(n, s.currency)}</div>
-                  <div className="text-muted text-xs">{handCounts[s.id] || 0} hands</div>
+                  <div className="text-muted text-xs">{handCounts[s.id] || 0} recorded {(handCounts[s.id] || 0) === 1 ? 'hand' : 'hands'}</div>
                 </div>
               </div>
             </div>
