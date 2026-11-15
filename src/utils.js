@@ -634,6 +634,57 @@ export function facingTap(taps, pos, ctx) {
     : { pos, action: 'check', amount: 0 };
 }
 
+// True when tapping `pos` would be a call that ends the betting round (no seat
+// left due to act). Such a tap must not default to call — the recorder asks.
+export function closingCall(taps, pos, ctx) {
+  const t = facingTap(taps, pos, ctx);
+  if (t.action !== 'call') return false;
+  const m = materializeStreet([...taps, t], { ...ctx, close: false });
+  return !m.error && m.nextPos === null;
+}
+
+// ── C-bet guess (flop / turn suggestion card) ─────────────────────────────────
+function lastAggressor(actions) {
+  for (let i = (actions || []).length - 1; i >= 0; i--) {
+    const a = actions[i];
+    if (a.action === 'bet' || a.action === 'raise') return a.pos;
+  }
+  return null;
+}
+
+// Who is expected to bet first on `street` ('flop' | 'turn') and the final
+// pre-flop bet (what each caller put in). Turn: last flop bettor, else the
+// pre-flop aggressor (delayed c-bet). null when nobody raised pre-flop.
+export function cbetHint({ preflop = [], flop = [] }, street) {
+  const pfAggressor = lastAggressor(preflop);
+  if (!pfAggressor) return null;
+  const pfAmount = Math.max(0, ...preflop.filter(a => a.action !== 'fold').map(a => a.amount || 0));
+  const aggressor = street === 'turn' ? (lastAggressor(flop) || pfAggressor) : pfAggressor;
+  return { aggressor, pfAmount };
+}
+
+// Suggested sizes: the pre-flop amount, 2/3 pot 3-way or 3/4 pot 4+ way, full pot.
+export function cbetSizes(pfAmount, pot, players, bb) {
+  const toBB = (x) => (bb > 0 ? Math.max(bb, Math.round(x / bb) * bb) : Math.round(x));
+  const sizes = [{ label: 'PF', amt: pfAmount }];
+  if (players === 3) sizes.push({ label: '2/3', amt: toBB(pot * 2 / 3) });
+  if (players >= 4) sizes.push({ label: '3/4', amt: toBB(pot * 3 / 4) });
+  sizes.push({ label: 'Pot', amt: pot });
+  return sizes;
+}
+
+// Check taps for every seat due before `target` (untapped seats would fold).
+// null if `target` is never due to act.
+export function checksUntil(taps, target, ctx) {
+  const out = [...taps];
+  for (;;) {
+    const m = materializeStreet(out, { ...ctx, close: false });
+    if (m.error || m.nextPos === null) return null;
+    if (m.nextPos === target) return out.slice(taps.length);
+    out.push({ pos: m.nextPos, action: 'check', amount: 0 });
+  }
+}
+
 // A bet / raise-to for `pos` after `tapsBefore`; null if the size is invalid.
 export function betTap(tapsBefore, pos, amount, ctx) {
   const { currentBet } = streetStateAfter(tapsBefore, ctx);
