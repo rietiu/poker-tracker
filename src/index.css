@@ -1562,3 +1562,6 @@ h3 { font-size: 1rem; font-weight: 600; }
 
 .currency-totals-label { align-self: center; font-size: 0.75rem; color: var(--text2); margin-right: 2px; }
 .seq-call-choice { width: 100%; margin-bottom: 12px; }
+.cbet-card { border: 1px dashed var(--border, #555); border-radius: 10px; padding: 10px; margin: 8px 0; }
+.cbet-amount { flex: 1; text-align: center; font-size: 18px; }
+.cbet-donks { flex-wrap: wrap; }

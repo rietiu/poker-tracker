@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
@@ -645,6 +645,7 @@ export default function HandRecorder() {
             locked={boardLock.flop}
             onBack={() => setStep(2)}
             backLabel="Back to pre-flop"
+            cbet={cbetHint({ preflop: hand.preflop.actions }, 'flop')}
           />
 
           <div className="form-group">
@@ -689,6 +690,7 @@ export default function HandRecorder() {
             locked={boardLock.turn}
             onBack={() => setStep(3)}
             backLabel="Back to flop"
+            cbet={cbetHint({ preflop: hand.preflop.actions, flop: hand.flop.actions }, 'turn')}
           />
 
           <div className="form-group">

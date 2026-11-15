@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   PREFLOP_ACTION_ORDER, POSTFLOP_ACTION_ORDER, POSITION_COLORS, computeStreetState,
   materializeStreet, tapsFromActions, facingTap, betTap, allInTap, currencySymbol, pendingFolds, closingCall,
+  cbetSizes, checksUntil,
 } from '../utils';
 
 const NEXT_STREET = { preflop: 'Flop', flop: 'Turn', turn: 'River', river: 'Result' };
@@ -56,6 +57,7 @@ export default function PositionSequencer({
   locked = '',
   onBack = null,
   backLabel = 'Back',
+  cbet = null,
 }) {
   const sym = currencySymbol(currency);
   const isPreflop = street === 'preflop';
@@ -89,6 +91,8 @@ export default function PositionSequencer({
   const [raiseFor, setRaiseFor] = useState(null);
   // Seat whose call would end the round: nothing is recorded until Call / a size is picked.
   const [choiceFor, setChoiceFor] = useState(null);
+  // C-bet guess picked on the suggestion card, being adjusted before confirm.
+  const [hintPick, setHintPick] = useState(null); // { pos, amount }
   const [pendingAmount, setPendingAmount] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
 
@@ -124,6 +128,7 @@ export default function PositionSequencer({
   // One tap = call / check, and the bet / raise sizes open right away for that seat.
   function handleTileTap(pos) {
     if (locked) return;
+    setHintPick(null);
     if (choiceFor === pos) { setChoiceFor(null); return; }
     setChoiceFor(null);
     if (lastTap && lastTap.pos === pos && lastTap.action !== 'fold') {
@@ -196,6 +201,36 @@ export default function PositionSequencer({
     if (m) onCompleteRef.current?.(m.actions);
   }
 
+  // C-bet guess: everyone checks to the aggressor, who bets (or checks); seats
+  // before the aggressor may donk instead. Only before any tap on this street.
+  const hint = (() => {
+    if (!cbet || isPreflop || locked || heroFolded || taps.length > 0) return null;
+    const agg = cbet.aggressor;
+    if (!actionOrder.includes(agg) || allInBefore.includes(agg)) return null;
+    const pre = checksUntil([], agg, ctx);
+    if (!pre) return null;
+    return { agg, pre, sizes: cbetSizes(cbet.pfAmount, startPot, activePositions.length, bb) };
+  })();
+  const hintBet = (() => {
+    if (!hintPick) return null;
+    const pre = checksUntil([], hintPick.pos, ctx);
+    const t = pre && betTap(pre, hintPick.pos, hintPick.amount, ctx);
+    return t ? [...pre, t] : null;
+  })();
+  const seatName = (pos) => (pos === myPosition ? `${pos} (You)` : pos);
+  const nudge = (d) => setHintPick(h => ({ ...h, amount: Math.max(bb, (Number(h.amount) || 0) + d) }));
+
+  function confirmHint() {
+    if (!hintBet) return;
+    setHintPick(null);
+    emit(hintBet);
+  }
+
+  function aggressorChecks() {
+    setHintPick(null);
+    emit([...hint.pre, { pos: hint.agg, action: 'check', amount: 0 }]);
+  }
+
   // "Same as last hand": longest valid prefix of the previous hand's taps.
   const prevTaps = (() => {
     if (!isPreflop || taps.length > 0 || !prevPreflopActions?.length) return null;
@@ -250,6 +285,58 @@ export default function PositionSequencer({
       </div>
 
       {locked && <div className="seq-locked">{locked}</div>}
+
+      {hint && (
+        <div className="cbet-card">
+          {hintPick ? (
+            <>
+              <div className="text-sm mb-8">
+                {seatName(hintPick.pos)} {hintPick.pos === hint.agg ? 'bets' : 'donks'}
+                {checksUntil([], hintPick.pos, ctx)?.length ? <span className="text-muted"> · {checksUntil([], hintPick.pos, ctx).map(t => t.pos).join(', ')} check first</span> : null}
+              </div>
+              <div className="row gap-8">
+                <button className="btn btn-secondary btn-sm" onClick={() => nudge(-bb)}>−1bb</button>
+                <input
+                  type="number"
+                  className="form-input cbet-amount"
+                  value={hintPick.amount}
+                  onChange={e => setHintPick(h => ({ ...h, amount: e.target.value }))}
+                  inputMode="numeric"
+                />
+                <button className="btn btn-secondary btn-sm" onClick={() => nudge(bb)}>+1bb</button>
+              </div>
+              <div className="row gap-8 mt-8">
+                <button className="btn btn-primary btn-sm" style={{ flex: 1, opacity: hintBet ? 1 : 0.5 }} disabled={!hintBet} onClick={confirmHint}>
+                  Confirm {sym}{(Number(hintPick.amount) || 0).toLocaleString()}
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setHintPick(null)}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm mb-8">
+                {hint.pre.length > 0 && <>Check to {seatName(hint.agg)} · </>}{seatName(hint.agg)} bets:
+              </div>
+              <div className="pot-size-row">
+                {hint.sizes.map(({ label, amt }) => (
+                  <button key={label} className="pot-size-btn" onClick={() => setHintPick({ pos: hint.agg, amount: amt })}>
+                    <span className="pot-size-label">{label}</span>
+                    <span className="pot-size-amt">{sym}{amt.toLocaleString()}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="row gap-8 mt-8 cbet-donks">
+                <button className="btn btn-secondary btn-sm" onClick={aggressorChecks}>{seatName(hint.agg)} checks</button>
+                {hint.pre.map(t => (
+                  <button key={t.pos} className="btn btn-secondary btn-sm" onClick={() => setHintPick({ pos: t.pos, amount: cbet.pfAmount })}>
+                    {seatName(t.pos)} donk {sym}{cbet.pfAmount.toLocaleString()}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <div className={'pos-grid' + (locked ? ' pos-grid-locked' : '')}>
         {actionOrder.map(pos => {
