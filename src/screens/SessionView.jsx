@@ -143,8 +143,10 @@ function SeatGrid({ session, onSeatTap }) {
             ) : null}
             {status !== 'empty' && (seat.tags || []).length > 0 && (
               <div className="ssc-tags">
-                {seat.tags.map(t => (
-                  <span key={t} className="ssc-tag-dot" style={{ background: TAG_META[t]?.color }} title={TAG_META[t]?.label} />
+                {seat.tags.filter(t => TAG_META[t]).map(t => (
+                  <span key={t} className="ssc-tag-mini" style={{ background: TAG_META[t].color }} title={TAG_META[t].label}>
+                    {TAG_META[t].short}
+                  </span>
                 ))}
               </div>
             )}

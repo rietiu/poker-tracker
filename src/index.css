@@ -1052,11 +1052,15 @@ h3 { font-size: 1rem; font-weight: 600; }
   justify-content: center;
 }
 
-.ssc-tag-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.ssc-tag-mini {
   display: inline-block;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: #fff;
+  white-space: nowrap;
 }
 
 .ssc-left-pill {

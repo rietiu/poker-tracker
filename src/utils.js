@@ -382,14 +382,39 @@ export function randomPlayerName() {
   return RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
 }
 
+// Player read tags. Tags sharing a `group` are opposites (strong/weak,
+// wide/narrow) — picking one drops the other. `legacy` tags are the old
+// archetype labels: still rendered on players that have them, but no longer
+// offered in the selector.
 export const TAG_META = {
-  fish:   { emoji: '🐟', label: 'Fish',   color: '#1971c2' },
-  mouse:  { emoji: '🐭', label: 'Mouse',  color: '#868e96' },
-  aggro:  { emoji: '🔥', label: 'Aggro',  color: '#e8590c' },
-  reg:    { emoji: '⭐', label: 'Reg',    color: '#7048e8' },
-  maniac: { emoji: '💥', label: 'Maniac', color: '#c92a2a' },
-  rock:   { emoji: '🪨', label: 'Rock',   color: '#7d5a50' },
+  defStrong:   { emoji: '🛡️', label: '防守強', short: '防強', group: 'def',   color: '#1864ab' },
+  defWeak:     { emoji: '🛡️', label: '防守弱', short: '防弱', group: 'def',   color: '#5c8fc2' },
+  atkStrong:   { emoji: '⚔️', label: '進攻強', short: '攻強', group: 'atk',   color: '#c92a2a' },
+  atkWeak:     { emoji: '⚔️', label: '進攻弱', short: '攻弱', group: 'atk',   color: '#c87070' },
+  rangeWide:   { emoji: '↔️', label: '範圍寬', short: '範寬', group: 'range', color: '#2b8a3e' },
+  rangeNarrow: { emoji: '↔️', label: '範圍窄', short: '範窄', group: 'range', color: '#6a9a72' },
+  sticky:      { emoji: '🧲', label: '黏池',   short: '黏池', color: '#7048e8' },
+  fish:   { emoji: '🐟', label: 'Fish',   short: 'Fish',   legacy: true, color: '#1971c2' },
+  mouse:  { emoji: '🐭', label: 'Mouse',  short: 'Mouse',  legacy: true, color: '#868e96' },
+  aggro:  { emoji: '🔥', label: 'Aggro',  short: 'Aggro',  legacy: true, color: '#e8590c' },
+  reg:    { emoji: '⭐', label: 'Reg',    short: 'Reg',    legacy: true, color: '#7048e8' },
+  maniac: { emoji: '💥', label: 'Maniac', short: 'Maniac', legacy: true, color: '#c92a2a' },
+  rock:   { emoji: '🪨', label: 'Rock',   short: 'Rock',   legacy: true, color: '#7d5a50' },
 };
+
+// Toggle `tag` in a selection; selecting a grouped tag removes its opposite.
+export function toggleTag(selected, tag) {
+  if (selected.includes(tag)) return selected.filter(t => t !== tag);
+  const group = TAG_META[tag]?.group;
+  const kept = group ? selected.filter(t => TAG_META[t]?.group !== group) : selected;
+  return [...kept, tag];
+}
+
+// Tags the selector offers: every current tag, plus any legacy tag already
+// selected (so it can still be removed).
+export function selectableTags(selected = []) {
+  return Object.keys(TAG_META).filter(t => !TAG_META[t].legacy || selected.includes(t));
+}
 
 // ── Money: one source of truth for a hand's net chip result ──────────────────
 //
