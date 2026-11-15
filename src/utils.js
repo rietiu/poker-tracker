@@ -634,6 +634,15 @@ export function facingTap(taps, pos, ctx) {
     : { pos, action: 'check', amount: 0 };
 }
 
+// True when tapping `pos` would be a call that ends the betting round (no seat
+// left due to act). Such a tap must not default to call — the recorder asks.
+export function closingCall(taps, pos, ctx) {
+  const t = facingTap(taps, pos, ctx);
+  if (t.action !== 'call') return false;
+  const m = materializeStreet([...taps, t], { ...ctx, close: false });
+  return !m.error && m.nextPos === null;
+}
+
 // A bet / raise-to for `pos` after `tapsBefore`; null if the size is invalid.
 export function betTap(tapsBefore, pos, amount, ctx) {
   const { currentBet } = streetStateAfter(tapsBefore, ctx);
