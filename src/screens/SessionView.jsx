@@ -29,24 +29,30 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, onSaveDetails, o
   const [stack, setStack] = useState(String(s.estimatedStack || ''));
   const [tags, setTags] = useState(s.tags || []);
   const [showMoveMenu, setShowMoveMenu] = useState(false);
-  const emptySeats = (session.seats || [])
-    .filter(x => x.status === 'empty' && x.seatNum !== session.mySeat)
-    .map(x => x.seatNum);
+  // Any other seat is a target; a taken one means its occupant left.
+  const targets = (session.seats || [])
+    .filter(x => x.seatNum !== session.mySeat && x.seatNum !== seatNum);
 
   function saveDetails() {
     onSaveDetails(seatNum, { name: name.trim(), tags, estimatedStack: stack ? Number(stack) : '' });
   }
 
   const moveMenu = (onPick) => (
-    emptySeats.length === 0
-      ? <div className="text-muted text-sm mb-8">No empty seat — mark a seat empty first.</div>
-      : (
-        <div className="seat-grid" style={{ marginBottom: 8 }}>
-          {emptySeats.map(n => (
-            <button key={n} className="seat-btn" onClick={() => onPick(n)}>{n}</button>
-          ))}
-        </div>
-      )
+    <>
+      <div className="seat-grid" style={{ marginBottom: 4 }}>
+        {targets.map(x => (
+          <button
+            key={x.seatNum}
+            className={'seat-btn' + (x.status === 'empty' ? '' : ' seat-btn-taken')}
+            onClick={() => onPick(x.seatNum)}
+          >
+            {x.seatNum}
+            {x.status !== 'empty' && <span className="seat-btn-who">{x.name || x.code}</span>}
+          </button>
+        ))}
+      </div>
+      <div className="text-muted text-xs mb-8">Picking a taken seat marks its player as left.</div>
+    </>
   );
 
   return (
@@ -60,7 +66,7 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, onSaveDetails, o
         {isMySeat ? (
           <>
             <div className="form-group">
-              <label className="form-label">Move to an empty seat</label>
+              <label className="form-label">Move to seat</label>
               {moveMenu(n => onEvent({ type: 'heroMove', to: n }))}
             </div>
           </>

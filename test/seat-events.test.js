@@ -45,9 +45,25 @@ describe('applySeatEvent', () => {
     expect(seat(s1, 4).status).toBe('empty');
     expect(s1.seatLog[0]).toMatchObject({ type: 'heroMove', from: 4, to: 3 });
   });
-  it('moves only into an empty seat', () => {
-    expect(() => applySeatEvent(base(), { type: 'move', from: 2, to: 5 }, at)).toThrow();
-    expect(() => applySeatEvent(base(), { type: 'heroMove', to: 5 }, at)).toThrow();
+  it('I move onto a taken seat: its player is logged as left first', () => {
+    const s1 = applySeatEvent(base(), { type: 'heroMove', to: 5 }, at);
+    expect(s1.mySeat).toBe(5);
+    expect(seat(s1, 5)).toMatchObject({ status: 'active', code: '' });
+    expect(seat(s1, 4).status).toBe('empty');
+    expect(s1.seatLog).toEqual([
+      { at, type: 'left', seat: 5, code: 'C', name: '' },
+      { at, type: 'heroMove', from: 4, to: 5 },
+    ]);
+  });
+  it('a player moves onto a taken seat: the occupant is logged as left', () => {
+    const s1 = applySeatEvent(base(), { type: 'move', from: 2, to: 5 }, at);
+    expect(seat(s1, 5)).toMatchObject({ code: 'B', name: 'Korean' });
+    expect(s1.seatLog.map(e => [e.type, e.code])).toEqual([['left', 'C'], ['move', 'B']]);
+  });
+  it('a player cannot move into my seat or their own', () => {
+    expect(() => applySeatEvent(base(), { type: 'move', from: 2, to: 4 }, at)).toThrow();
+    expect(() => applySeatEvent(base(), { type: 'move', from: 2, to: 2 }, at)).toThrow();
+    expect(() => applySeatEvent(base(), { type: 'heroMove', to: 4 }, at)).toThrow();
   });
   it("a code is never reused in a session — a new player never gets a departed player's code", () => {
     const s1 = applySeatEvent(base(), { type: 'left', seat: 6 }, at);        // D leaves

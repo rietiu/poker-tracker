@@ -147,8 +147,9 @@ export function ensureSeatCodes(session) {
   return { ...session, seats, seatLog: session.seatLog || [] };
 }
 
-// One seat change at the table. Returns a new session (seats + seatLog);
-// throws if a move targets a seat that isn't empty.
+// One seat change at the table. Returns a new session (seats + seatLog).
+// A move onto a taken seat means its occupant left: they are logged as 'left'
+// first. Throws if a player move targets my seat.
 export function applySeatEvent(session, event, at = new Date().toISOString()) {
   const next = ensureSeatCodes(session);
   const seats = next.seats.map(x => ({ ...x }));
@@ -157,6 +158,13 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
   const who = (x) => ({ code: x.code || '', name: x.name || '' });
   let mySeat = next.mySeat;
   let log;
+  const pre = [];
+  const vacate = (n) => {
+    const s = get(n);
+    if (s.status === 'empty') return;
+    pre.push({ at, type: 'left', seat: n, ...who(s) });
+    Object.assign(s, cleared);
+  };
   switch (event.type) {
     case 'away':
     case 'back': {
@@ -181,7 +189,8 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
     }
     case 'move': {
       const from = get(event.from), to = get(event.to);
-      if (to.status !== 'empty' || event.to === mySeat) throw new Error(`Seat ${event.to} is not empty`);
+      if (event.to === mySeat || event.to === event.from) throw new Error(`Can't move to seat ${event.to}`);
+      vacate(event.to);
       Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, status: 'active' });
       log = { type: 'move', from: event.from, to: event.to, ...who(from) };
       Object.assign(from, cleared);
@@ -189,7 +198,8 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
     }
     case 'heroMove': {
       const to = get(event.to);
-      if (to.status !== 'empty') throw new Error(`Seat ${event.to} is not empty`);
+      if (event.to === mySeat) throw new Error(`Already in seat ${event.to}`);
+      vacate(event.to);
       Object.assign(to, { ...cleared, status: 'active' });
       Object.assign(get(mySeat), cleared);
       log = { type: 'heroMove', from: mySeat, to: event.to };
@@ -199,7 +209,7 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
     default:
       throw new Error(`Unknown seat event ${event.type}`);
   }
-  return { ...next, mySeat, seats, seatLog: [...next.seatLog, { at, ...log }] };
+  return { ...next, mySeat, seats, seatLog: [...next.seatLog, ...pre, { at, ...log }] };
 }
 
 export function describeSeatEvent(e) {
