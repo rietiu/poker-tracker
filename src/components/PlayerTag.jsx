@@ -1,7 +1,7 @@
 import { TAG_META, toggleTag, selectableTags, LOOK_GROUPS, LOOK_META, toggleLook, lookKeysIn } from '../utils';
 
 // Appearance chips, one row per group (nationality, age, …). Single choice
-// within a group except 穿戴, where items combine.
+// within a group, except 穿戴 and 特徵 where items combine.
 export function LookSelector({ selected = [], onChange }) {
   return (
     <div className="look-groups">

@@ -455,9 +455,11 @@ export const LOOK_GROUPS = [
   { id: 'age', label: '年紀' },
   { id: 'gender', label: '性別' },
   { id: 'wear', label: '穿戴', multi: true },
+  { id: 'traits', label: '特徵', multi: true },
   { id: 'familiar', label: '面熟' },
   { id: 'talk', label: '講話' },
 ];
+const MULTI_LOOK_GROUPS = new Set(LOOK_GROUPS.filter(g => g.multi).map(g => g.id));
 export const LOOK_META = {
   ph: { label: '菲律賓', group: 'nation' },
   cn: { label: '華人', group: 'nation' },
@@ -474,19 +476,24 @@ export const LOOK_META = {
   a60: { label: '60+', group: 'age' },
   male: { label: '男', group: 'gender' },
   female: { label: '女', group: 'gender' },
-  glasses: { label: '眼鏡', wear: true },
-  cap: { label: '帽', wear: true },
-  jacket: { label: '外套', wear: true },
-  mask: { label: '口罩', wear: true },
-  headphones: { label: '耳機', wear: true },
+  glasses: { label: '眼鏡', group: 'wear' },
+  cap: { label: '帽', group: 'wear' },
+  jacket: { label: '外套', group: 'wear' },
+  mask: { label: '口罩', group: 'wear' },
+  headphones: { label: '耳機', group: 'wear' },
+  rolex: { label: 'Rolex', group: 'traits' },
+  tattoo: { label: '紋身', group: 'traits' },
+  phone: { label: '成日睇電話', group: 'traits' },
   familiar: { label: '面熟', group: 'familiar' },
   stranger: { label: '面生', group: 'familiar' },
   chatty: { label: '愛講話', group: 'talk' },
   quiet: { label: '安靜', group: 'talk' },
 };
-export const toggleLook = (selected, key) => toggleKey(LOOK_META, selected, key);
-export const lookKeysIn = (groupId) =>
-  Object.keys(LOOK_META).filter(k => (groupId === 'wear' ? LOOK_META[k].wear : LOOK_META[k].group === groupId));
+export const toggleLook = (selected, key) =>
+  MULTI_LOOK_GROUPS.has(LOOK_META[key]?.group)
+    ? (selected.includes(key) ? selected.filter(k => k !== key) : [...selected, key])
+    : toggleKey(LOOK_META, selected, key);
+export const lookKeysIn = (groupId) => Object.keys(LOOK_META).filter(k => LOOK_META[k].group === groupId);
 // "韓國 · 40幾 · 眼鏡" in LOOK_META order.
 export const describeLooks = (looks = []) =>
   Object.keys(LOOK_META).filter(k => looks.includes(k)).map(k => LOOK_META[k].label).join(' · ');

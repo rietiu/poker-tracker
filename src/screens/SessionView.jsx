@@ -158,7 +158,7 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
               <label className="form-label">Other notes</label>
               <input
                 className="form-input"
-                placeholder="e.g. Rolex, tattoo, always on phone"
+                placeholder="e.g. 金鏈、成日食煙、跟朋友一齊嚟"
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
               />

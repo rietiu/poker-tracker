@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchPlayers, applySeatEvent, toggleLook, describeLooks } from '../src/utils.js';
+import { matchPlayers, applySeatEvent, toggleLook, describeLooks, lookKeysIn } from '../src/utils.js';
 
 const players = [
   { id: '1', name: 'Korean', notes: 'red cap', lastSeen: '2026-11-01T10:00:00Z' },
@@ -48,6 +48,9 @@ describe('looks helpers', () => {
     expect(toggleLook(['kr', 'a40'], 'cn')).toEqual(['a40', 'cn']);
     expect(toggleLook(['glasses'], 'mask')).toEqual(['glasses', 'mask']);
     expect(toggleLook(['glasses', 'mask'], 'mask')).toEqual(['glasses']);
+    expect(toggleLook(['rolex', 'glasses'], 'tattoo')).toEqual(['rolex', 'glasses', 'tattoo']);
+    expect(lookKeysIn('traits')).toEqual(['rolex', 'tattoo', 'phone']);
+    expect(lookKeysIn('wear')).toEqual(['glasses', 'cap', 'jacket', 'mask', 'headphones']);
   });
   it('describeLooks reads in a fixed order', () => {
     expect(describeLooks(['glasses', 'a40', 'kr'])).toBe('韓國 · 40幾 · 眼鏡');
