@@ -24,7 +24,8 @@ describe('toggleTag', () => {
 describe('selectableTags', () => {
   it('offers only current tags by default', () => {
     const tags = selectableTags([]);
-    expect(tags).toEqual(['defStrong', 'defWeak', 'atkStrong', 'atkWeak', 'rangeWide', 'rangeNarrow', 'sticky']);
+    expect(tags).toEqual(['defStrong', 'defWeak', 'atkStrong', 'atkWeak', 'rangeWide', 'rangeNarrow', 'sticky',
+      'likes3b', 'raiseOnly', 'ep3b', 'trapper', 'reverse', 'rarelyPlays']);
     expect(tags.every(t => !TAG_META[t].legacy)).toBe(true);
   });
 
