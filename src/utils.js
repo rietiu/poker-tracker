@@ -147,16 +147,24 @@ export function ensureSeatCodes(session) {
   return { ...session, seats, seatLog: session.seatLog || [] };
 }
 
-// One seat change at the table. Returns a new session (seats + seatLog);
-// throws if a move targets a seat that isn't empty.
+// One seat change at the table. Returns a new session (seats + seatLog).
+// A move onto a taken seat means its occupant left: they are logged as 'left'
+// first. Throws if a player move targets my seat.
 export function applySeatEvent(session, event, at = new Date().toISOString()) {
   const next = ensureSeatCodes(session);
   const seats = next.seats.map(x => ({ ...x }));
   const get = (n) => seats.find(x => x.seatNum === n);
-  const cleared = { code: '', name: '', tags: [], estimatedStack: '', status: 'empty' };
+  const cleared = { code: '', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', status: 'empty' };
   const who = (x) => ({ code: x.code || '', name: x.name || '' });
   let mySeat = next.mySeat;
   let log;
+  const pre = [];
+  const vacate = (n) => {
+    const s = get(n);
+    if (s.status === 'empty') return;
+    pre.push({ at, type: 'left', seat: n, ...who(s) });
+    Object.assign(s, cleared);
+  };
   switch (event.type) {
     case 'away':
     case 'back': {
@@ -175,21 +183,23 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
       const s = get(event.seat);
       // never reuse a code that anyone used earlier in this session
       const used = [...seats.map(x => x.code), ...next.seatLog.map(e => e.code)].filter(Boolean);
-      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', code: nextPlayerCode(used) });
+      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', code: nextPlayerCode(used) });
       log = { type: 'seated', seat: event.seat, code: s.code };
       break;
     }
     case 'move': {
       const from = get(event.from), to = get(event.to);
-      if (to.status !== 'empty' || event.to === mySeat) throw new Error(`Seat ${event.to} is not empty`);
-      Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, status: 'active' });
+      if (event.to === mySeat || event.to === event.from) throw new Error(`Can't move to seat ${event.to}`);
+      vacate(event.to);
+      Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, playerId: from.playerId || '', notes: from.notes || '', status: 'active' });
       log = { type: 'move', from: event.from, to: event.to, ...who(from) };
       Object.assign(from, cleared);
       break;
     }
     case 'heroMove': {
       const to = get(event.to);
-      if (to.status !== 'empty') throw new Error(`Seat ${event.to} is not empty`);
+      if (event.to === mySeat) throw new Error(`Already in seat ${event.to}`);
+      vacate(event.to);
       Object.assign(to, { ...cleared, status: 'active' });
       Object.assign(get(mySeat), cleared);
       log = { type: 'heroMove', from: mySeat, to: event.to };
@@ -199,7 +209,19 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
     default:
       throw new Error(`Unknown seat event ${event.type}`);
   }
-  return { ...next, mySeat, seats, seatLog: [...next.seatLog, { at, ...log }] };
+  return { ...next, mySeat, seats, seatLog: [...next.seatLog, ...pre, { at, ...log }] };
+}
+
+// Saved players whose nickname or notes contain `query` (case-insensitive),
+// name matches first, most recently seen first. Empty query → none.
+export function matchPlayers(players, query, limit = 5) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return [];
+  const score = (p) => ((p.name || '').toLowerCase().includes(q) ? 0 : (p.notes || '').toLowerCase().includes(q) ? 1 : 2);
+  return players
+    .filter(p => score(p) < 2)
+    .sort((a, b) => score(a) - score(b) || (b.lastSeen || b.createdAt || '').localeCompare(a.lastSeen || a.createdAt || ''))
+    .slice(0, limit);
 }
 
 export function describeSeatEvent(e) {
@@ -382,14 +404,39 @@ export function randomPlayerName() {
   return RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
 }
 
+// Player read tags. Tags sharing a `group` are opposites (strong/weak,
+// wide/narrow) — picking one drops the other. `legacy` tags are the old
+// archetype labels: still rendered on players that have them, but no longer
+// offered in the selector.
 export const TAG_META = {
-  fish:   { emoji: '🐟', label: 'Fish',   color: '#1971c2' },
-  mouse:  { emoji: '🐭', label: 'Mouse',  color: '#868e96' },
-  aggro:  { emoji: '🔥', label: 'Aggro',  color: '#e8590c' },
-  reg:    { emoji: '⭐', label: 'Reg',    color: '#7048e8' },
-  maniac: { emoji: '💥', label: 'Maniac', color: '#c92a2a' },
-  rock:   { emoji: '🪨', label: 'Rock',   color: '#7d5a50' },
+  defStrong:   { emoji: '🛡️', label: '防守強', short: '防強', group: 'def',   color: '#1864ab' },
+  defWeak:     { emoji: '🛡️', label: '防守弱', short: '防弱', group: 'def',   color: '#5c8fc2' },
+  atkStrong:   { emoji: '⚔️', label: '進攻強', short: '攻強', group: 'atk',   color: '#c92a2a' },
+  atkWeak:     { emoji: '⚔️', label: '進攻弱', short: '攻弱', group: 'atk',   color: '#c87070' },
+  rangeWide:   { emoji: '↔️', label: '範圍寬', short: '範寬', group: 'range', color: '#2b8a3e' },
+  rangeNarrow: { emoji: '↔️', label: '範圍窄', short: '範窄', group: 'range', color: '#6a9a72' },
+  sticky:      { emoji: '🧲', label: '黏池',   short: '黏池', color: '#7048e8' },
+  fish:   { emoji: '🐟', label: 'Fish',   short: 'Fish',   legacy: true, color: '#1971c2' },
+  mouse:  { emoji: '🐭', label: 'Mouse',  short: 'Mouse',  legacy: true, color: '#868e96' },
+  aggro:  { emoji: '🔥', label: 'Aggro',  short: 'Aggro',  legacy: true, color: '#e8590c' },
+  reg:    { emoji: '⭐', label: 'Reg',    short: 'Reg',    legacy: true, color: '#7048e8' },
+  maniac: { emoji: '💥', label: 'Maniac', short: 'Maniac', legacy: true, color: '#c92a2a' },
+  rock:   { emoji: '🪨', label: 'Rock',   short: 'Rock',   legacy: true, color: '#7d5a50' },
 };
+
+// Toggle `tag` in a selection; selecting a grouped tag removes its opposite.
+export function toggleTag(selected, tag) {
+  if (selected.includes(tag)) return selected.filter(t => t !== tag);
+  const group = TAG_META[tag]?.group;
+  const kept = group ? selected.filter(t => TAG_META[t]?.group !== group) : selected;
+  return [...kept, tag];
+}
+
+// Tags the selector offers: every current tag, plus any legacy tag already
+// selected (so it can still be removed).
+export function selectableTags(selected = []) {
+  return Object.keys(TAG_META).filter(t => !TAG_META[t].legacy || selected.includes(t));
+}
 
 // ── Money: one source of truth for a hand's net chip result ──────────────────
 //

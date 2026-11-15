@@ -1,4 +1,4 @@
-import { TAG_META } from '../utils';
+import { TAG_META, toggleTag, selectableTags } from '../utils';
 
 export default function PlayerTag({ tag }) {
   const meta = TAG_META[tag];
@@ -11,10 +11,9 @@ export default function PlayerTag({ tag }) {
 }
 
 export function TagSelector({ selected = [], onChange }) {
-  const tags = Object.keys(TAG_META);
   return (
     <div className="pill-group" style={{ flexWrap: 'wrap' }}>
-      {tags.map(tag => {
+      {selectableTags(selected).map(tag => {
         const meta = TAG_META[tag];
         const isSelected = selected.includes(tag);
         return (
@@ -22,13 +21,7 @@ export function TagSelector({ selected = [], onChange }) {
             key={tag}
             className={'pill' + (isSelected ? ' selected' : '')}
             style={isSelected ? { background: meta.color, borderColor: meta.color } : {}}
-            onClick={() => {
-              if (isSelected) {
-                onChange(selected.filter(t => t !== tag));
-              } else {
-                onChange([...selected, tag]);
-              }
-            }}
+            onClick={() => onChange(toggleTag(selected, tag))}
           >
             {meta.emoji} {meta.label}
           </button>

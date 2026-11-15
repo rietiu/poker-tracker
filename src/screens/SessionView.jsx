@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { get, put, del, getHandsBySession } from '../db';
-import { isRedCard, TAG_META, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent } from '../utils';
+import { get, getAll, put, del, getHandsBySession } from '../db';
+import { isRedCard, TAG_META, matchPlayers, uuid, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector } from '../components/PlayerTag';
 
@@ -22,31 +22,59 @@ function CardBadge({ card }) {
 
 // One seat at the table: who's there (code / nickname / tags / stack) and what
 // happened (away, back, left, someone new, moved). I can move to an empty seat.
-function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, onSaveDetails, onEvent, onClose }) {
+function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], onSaveDetails, onEvent, onClose }) {
   const s = seat || {};
   const status = s.status || 'active';
   const [name, setName] = useState(s.name || '');
   const [stack, setStack] = useState(String(s.estimatedStack || ''));
   const [tags, setTags] = useState(s.tags || []);
+  const [notes, setNotes] = useState(s.notes || '');
+  const [playerId, setPlayerId] = useState(s.playerId || '');
+  const [remember, setRemember] = useState(true);
   const [showMoveMenu, setShowMoveMenu] = useState(false);
-  const emptySeats = (session.seats || [])
-    .filter(x => x.status === 'empty' && x.seatNum !== session.mySeat)
-    .map(x => x.seatNum);
+  const linked = players.find(p => p.id === playerId);
+  // Saved players already sitting elsewhere at this table aren't offered.
+  const seatedIds = new Set((session.seats || []).filter(x => x.seatNum !== seatNum && x.playerId).map(x => x.playerId));
+  const suggestions = linked ? [] : matchPlayers(players.filter(p => !seatedIds.has(p.id)), name);
+
+  function pickPlayer(p) {
+    setPlayerId(p.id);
+    setName(p.name);
+    setTags(p.tags || []);
+    setNotes(p.notes || '');
+  }
+
+  function unlink() {
+    setPlayerId('');
+  }
+  // Any other seat is a target; a taken one means its occupant left.
+  const targets = (session.seats || [])
+    .filter(x => x.seatNum !== session.mySeat && x.seatNum !== seatNum);
 
   function saveDetails() {
-    onSaveDetails(seatNum, { name: name.trim(), tags, estimatedStack: stack ? Number(stack) : '' });
+    onSaveDetails(
+      seatNum,
+      { name: name.trim(), tags, notes: notes.trim(), playerId, estimatedStack: stack ? Number(stack) : '' },
+      { remember: !playerId && remember && !!name.trim() },
+    );
   }
 
   const moveMenu = (onPick) => (
-    emptySeats.length === 0
-      ? <div className="text-muted text-sm mb-8">No empty seat — mark a seat empty first.</div>
-      : (
-        <div className="seat-grid" style={{ marginBottom: 8 }}>
-          {emptySeats.map(n => (
-            <button key={n} className="seat-btn" onClick={() => onPick(n)}>{n}</button>
-          ))}
-        </div>
-      )
+    <>
+      <div className="seat-grid" style={{ marginBottom: 4 }}>
+        {targets.map(x => (
+          <button
+            key={x.seatNum}
+            className={'seat-btn' + (x.status === 'empty' ? '' : ' seat-btn-taken')}
+            onClick={() => onPick(x.seatNum)}
+          >
+            {x.seatNum}
+            {x.status !== 'empty' && <span className="seat-btn-who">{x.name || x.code}</span>}
+          </button>
+        ))}
+      </div>
+      <div className="text-muted text-xs mb-8">Picking a taken seat marks its player as left.</div>
+    </>
   );
 
   return (
@@ -60,7 +88,7 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, onSaveDetails, o
         {isMySeat ? (
           <>
             <div className="form-group">
-              <label className="form-label">Move to an empty seat</label>
+              <label className="form-label">Move to seat</label>
               {moveMenu(n => onEvent({ type: 'heroMove', to: n }))}
             </div>
           </>
@@ -87,6 +115,42 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, onSaveDetails, o
                 />
                 <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0 }} onClick={() => setName(randomPlayerName())} title="Random nickname">?</button>
               </div>
+              {linked && (
+                <div className="known-player-linked">
+                  <span>✓ Saved player — tags and notes update their profile</span>
+                  <button className="btn btn-ghost btn-sm" onClick={unlink}>Unlink</button>
+                </div>
+              )}
+              {suggestions.length > 0 && (
+                <div className="known-player-list">
+                  <div className="text-muted text-xs">Seen before?</div>
+                  {suggestions.map(p => (
+                    <button key={p.id} className="known-player-item" onClick={() => pickPlayer(p)}>
+                      <span className="known-player-name">{p.name}</span>
+                      {(p.tags || []).filter(t => TAG_META[t]).map(t => (
+                        <span key={t} className="ssc-tag-mini" style={{ background: TAG_META[t].color }}>{TAG_META[t].short}</span>
+                      ))}
+                      {p.notes && <span className="known-player-notes">{p.notes}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!linked && name.trim() && (
+                <label className="known-player-remember">
+                  <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
+                  Remember this player for future sessions
+                </label>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">How to recognise / notes</label>
+              <input
+                className="form-input"
+                placeholder="e.g. red cap, always 3-bets the button"
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+              />
             </div>
 
             <div className="form-group">
@@ -143,8 +207,10 @@ function SeatGrid({ session, onSeatTap }) {
             ) : null}
             {status !== 'empty' && (seat.tags || []).length > 0 && (
               <div className="ssc-tags">
-                {seat.tags.map(t => (
-                  <span key={t} className="ssc-tag-dot" style={{ background: TAG_META[t]?.color }} title={TAG_META[t]?.label} />
+                {seat.tags.filter(t => TAG_META[t]).map(t => (
+                  <span key={t} className="ssc-tag-mini" style={{ background: TAG_META[t].color }} title={TAG_META[t].label}>
+                    {TAG_META[t].short}
+                  </span>
                 ))}
               </div>
             )}
@@ -162,6 +228,9 @@ export default function SessionView() {
   const [session, setSession] = useState(null);
   const [hands, setHands] = useState([]);
   const [editingSeat, setEditingSeat] = useState(null); // seatNum or null
+  const [players, setPlayers] = useState([]); // saved player profiles
+
+  useEffect(() => { getAll('players').then(setPlayers); }, []);
 
   useEffect(() => {
     async function load() {
@@ -186,7 +255,21 @@ export default function SessionView() {
     setSession(updated);
   }
 
-  async function handleSaveDetails(seatNum, patch) {
+  async function handleSaveDetails(seatNum, patch, { remember } = {}) {
+    // Keep the saved player profile in step with what I record at the table.
+    const now = new Date().toISOString();
+    let player = null;
+    if (patch.playerId) {
+      const prev = players.find(p => p.id === patch.playerId);
+      if (prev) player = { ...prev, name: patch.name || prev.name, tags: patch.tags, notes: patch.notes, lastSeen: now };
+    } else if (remember) {
+      player = { id: uuid(), name: patch.name, tags: patch.tags, notes: patch.notes, createdAt: now, lastSeen: now };
+      patch = { ...patch, playerId: player.id };
+    }
+    if (player) {
+      await put('players', player);
+      setPlayers(prev => [...prev.filter(p => p.id !== player.id), player]);
+    }
     const seats = (session.seats || []).map(x => (x.seatNum === seatNum ? { ...x, ...patch } : x));
     await saveSession({ ...session, seats });
     setEditingSeat(null);
@@ -335,6 +418,7 @@ export default function SessionView() {
           isMySeat={editingSeat === session.mySeat}
           session={session}
           sym={currencySymbol(session.currency)}
+          players={players}
           onSaveDetails={handleSaveDetails}
           onEvent={handleSeatEvent}
           onClose={() => setEditingSeat(null)}
