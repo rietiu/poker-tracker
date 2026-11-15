@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, del } from '../db';
-import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB, currencySymbol, formatGame } from '../utils';
+import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB, currencySymbol, formatGame, formatWhen } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
 
@@ -287,6 +287,7 @@ export default function HandDetail() {
         <div className="row gap-8 mb-8">
           <PositionBadge position={hand.myPosition} />
           {session && <span className="text-muted text-sm">{session.venue || formatGame(session.game, session.currency)}</span>}
+          {hand.playedAt && <span className="text-muted text-sm">· {formatWhen(hand.playedAt)}</span>}
         </div>
         <div className="row gap-8">
           {hand.holeCards?.map((c, i) => <CardBadge key={i} card={c} large />)}

@@ -1649,3 +1649,9 @@ h3 { font-size: 1rem; font-weight: 600; }
 .cbet-card { border: 1px dashed var(--border, #555); border-radius: 10px; padding: 10px; margin: 8px 0; }
 .cbet-amount { flex: 1; text-align: center; font-size: 18px; }
 .cbet-donks { flex-wrap: wrap; }
+
+/* ── Time row (session start / hand played at) ── */
+.time-row { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
+.time-row .btn { padding-left: 8px; padding-right: 8px; }
+.time-input { width: 140px; flex: 0 0 140px; min-width: 0; padding: 6px 8px; }
+.time-unknown-on { color: var(--accent); font-weight: 700; }

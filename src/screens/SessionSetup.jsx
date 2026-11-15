@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { put, getSessionsSorted } from '../db';
-import { uuid, CURRENCIES, currencySymbol, recentValues, recentGames, buildGame, formatGame, sessionProfiles, profileSummary } from '../utils';
+import { uuid, clockOf, sessionStartFrom, CURRENCIES, currencySymbol, recentValues, recentGames, buildGame, formatGame, sessionProfiles, profileSummary } from '../utils';
 import { rakeProfileFor } from '../pots';
 
 const SEAT_COUNTS = [6, 8, 9];
@@ -57,6 +57,7 @@ export default function SessionSetup() {
   const [totalSeats, setTotalSeats] = useState(6);
   const [mySeat, setMySeat] = useState(1);
   const [myStack, setMyStack] = useState('');
+  const [startTime, setStartTime] = useState(() => clockOf(new Date().toISOString()));
   const [rakeType, setRakeType] = useState('percent');
   const [rake, setRake] = useState('');
   const [rakeMax, setRakeMax] = useState('');
@@ -184,7 +185,7 @@ export default function SessionSetup() {
 
     const session = {
       id: uuid(),
-      date: new Date().toISOString(),
+      date: sessionStartFrom(startTime), // when play started (editable), not when this was typed
       venue: venue.trim(),
       game: effectiveGame,
       currency,
@@ -466,6 +467,14 @@ export default function SessionSetup() {
       </div>
 
       </>)}
+
+      <div className="form-group">
+        <label className="form-label">Start time</label>
+        <div className="time-row">
+          <input type="time" className="form-input time-input" value={startTime} onChange={e => setStartTime(e.target.value)} />
+          <button className="btn btn-ghost btn-sm" onClick={() => setStartTime(clockOf(new Date().toISOString()))}>Now</button>
+        </div>
+      </div>
 
       <div style={{ paddingBottom: 24 }}>
         <button className="btn btn-primary btn-full" onClick={handleStart} disabled={!effectiveGame} style={{ opacity: effectiveGame ? 1 : 0.5 }}>

@@ -245,6 +245,45 @@ export function describeSeatEvent(e) {
   }
 }
 
+// ── Wall-clock times (local) ─────────────────────────────────────────────────
+const pad2 = (n) => String(n).padStart(2, '0');
+// "HH:MM" of an ISO time; '' when missing or invalid.
+export function clockOf(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? '' : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function atClock(day, hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const d = new Date(day);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+// "Nov 15 21:05" for lists.
+export function formatWhen(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? '' : `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${clockOf(iso)}`;
+}
+// Session start typed as "HH:MM": today, unless that is still in the future
+// (opened after midnight for a session that began last night) → yesterday.
+export function sessionStartFrom(hhmm, now = new Date()) {
+  if (!/^\d{1,2}:\d{2}$/.test(hhmm || '')) return new Date(now).toISOString();
+  const d = atClock(now, hhmm);
+  if (d.getTime() > new Date(now).getTime() + 5 * 60000) d.setDate(d.getDate() - 1);
+  return d.toISOString();
+}
+// Hand time typed as "HH:MM" → ISO on the session's day; a time well before
+// the session started means the game went past midnight → next day.
+// Blank → null (time unknown).
+export function handTimeFrom(hhmm, sessionStartIso) {
+  if (!/^\d{1,2}:\d{2}$/.test(hhmm || '')) return null;
+  const start = new Date(sessionStartIso || Date.now());
+  const d = atClock(start, hhmm);
+  if (d.getTime() < start.getTime() - 60 * 60000) d.setDate(d.getDate() + 1);
+  return d.toISOString();
+}
+
 // Default player codes: A, B, … Z, AA, AB, …
 export function nextPlayerCode(used) {
   const taken = new Set(used || []);

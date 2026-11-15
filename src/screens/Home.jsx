@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSessionsSorted, getHandsBySession } from '../db';
-import { sumNet, parseBB, parseSB, formatSigned, sumByCurrency, formatGame } from '../utils';
+import { sumNet, parseBB, parseSB, formatSigned, sumByCurrency, formatGame, formatWhen } from '../utils';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -30,11 +30,6 @@ export default function Home() {
     }
     load();
   }, []);
-
-  function fmtDate(iso) {
-    if (!iso) return '';
-    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  }
 
   // Never add different currencies together: one total per currency.
   const totals = sumByCurrency(sessions.map(s => ({ currency: s.currency, amount: netResults[s.id] || 0 })));
@@ -76,7 +71,7 @@ export default function Home() {
               <div className="row-between">
                 <div>
                   <div style={{ fontWeight: 600 }}>{s.venue || 'Unnamed venue'}</div>
-                  <div className="text-muted text-sm">{formatGame(s.game, s.currency)} · {fmtDate(s.date)}</div>
+                  <div className="text-muted text-sm">{formatGame(s.game, s.currency)} · {formatWhen(s.date)}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(n, s.currency)}</div>

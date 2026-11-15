@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllHandsSorted, getSessionsSorted } from '../db';
-import { isRedCard, handNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB, currencySymbol, formatSigned, sumByCurrency, formatGame } from '../utils';
+import { isRedCard, handNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB, currencySymbol, formatSigned, sumByCurrency, formatGame, formatWhen } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 
 function CardBadge({ card }) {
@@ -172,7 +172,7 @@ export default function History() {
                     <span>{hand.holeCards?.map((c, i) => <CardBadge key={i} card={c} />)}</span>
                   </div>
                   <div className="text-muted text-xs mt-8">
-                    {sessionLabel(hand.sessionId)} · #{hand.handNum} · {fmtDate(hand.createdAt)}
+                    {sessionLabel(hand.sessionId)} · #{hand.handNum} · {hand.playedAt ? formatWhen(hand.playedAt) : fmtDate(hand.createdAt)}
                   </div>
                 </div>
                 <span className={res.cls}>{res.text}</span>

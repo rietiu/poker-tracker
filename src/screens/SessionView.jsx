@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getAll, put, del, getHandsBySession } from '../db';
-import { isRedCard, TAG_META, matchPlayers, toggleLook, describeLooks, uuid, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent } from '../utils';
+import { isRedCard, TAG_META, matchPlayers, toggleLook, describeLooks, uuid, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent, clockOf } from '../utils';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector, LookSelector } from '../components/PlayerTag';
 
@@ -319,7 +319,7 @@ export default function SessionView() {
         <button className="back-btn" onClick={() => navigate('/')}>← Back</button>
         <div style={{ flex: 1 }}>
           <h1>{session.venue || 'Unnamed venue'}</h1>
-          <div className="text-muted text-sm">{formatGame(session.game, session.currency)} · {session.totalSeats}-handed</div>
+          <div className="text-muted text-sm">{formatGame(session.game, session.currency)} · {session.totalSeats}-handed · started {clockOf(session.date)}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className={netResult >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(netResult, session.currency)}</div>
@@ -386,6 +386,7 @@ export default function SessionView() {
               <div className="row-between">
                 <div className="row gap-8">
                   <span className="text-muted text-sm">#{hand.handNum}</span>
+                  {hand.playedAt && <span className="text-muted text-xs">{clockOf(hand.playedAt)}</span>}
                   {hand.quick && <span className="quick-badge">Q</span>}
                   <PositionBadge position={hand.myPosition} />
                   <span>

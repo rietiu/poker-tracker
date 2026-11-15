@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint, clockOf, handTimeFrom } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
@@ -51,6 +51,7 @@ export default function HandRecorder() {
     turn: { card: null, actions: [], notes: '', endPot: 0 },
     river: { card: null, actions: [], notes: '', endPot: 0 },
     result: { outcome: '', amount: '', notes: '', winner: '' },
+    playedTime: clockOf(new Date().toISOString()), // "HH:MM" when the hand was played; '' = unknown
   });
 
   const [bb, setBb] = useState(2);
@@ -110,6 +111,7 @@ export default function HandRecorder() {
             endPot: record.river?.pot || 0,
           },
           result: record.result || { outcome: '', amount: '', notes: '', winner: '' },
+          playedTime: clockOf(record.playedAt),
         });
         setStep(6);
       } else if (isResumeMode) {
@@ -130,6 +132,7 @@ export default function HandRecorder() {
               turn:    { card: null, actions: [], notes: '', endPot: 0, ...(saved.turn || {}) },
               river:   { card: null, actions: [], notes: '', endPot: 0, ...(saved.river || {}) },
               result:  { outcome: '', amount: '', notes: '', winner: '', ...(saved.result || {}) },
+              playedTime: saved.playedTime ?? clockOf(record.createdAt),
             });
           }
           if (record.draftState?.step != null) setStep(record.draftState.step);
@@ -239,6 +242,7 @@ export default function HandRecorder() {
         } : null,
         result: hand.result,
         notes: hand.result.notes || '',
+        playedAt: handTimeFrom(hand.playedTime, session?.date),
         updatedAt: new Date().toISOString(),
       };
       await put('hands', updated);
@@ -290,12 +294,33 @@ export default function HandRecorder() {
       } : null,
       result: hand.result,
       notes: hand.result.notes || '',
+      playedAt: handTimeFrom(hand.playedTime, session?.date),
       createdAt: new Date().toISOString(),
     };
 
     await put('hands', record);
     navigate(`/session/${resolvedSessionId}`);
   }
+
+  // When the hand was played — best effort: defaults to now, editable, or unknown.
+  const timeRow = (
+    <div className="time-row mb-12">
+      <span className="text-muted text-sm">🕒 Played at</span>
+      <input
+        type="time"
+        className="form-input time-input"
+        value={hand.playedTime || ''}
+        onChange={e => patchHand({ playedTime: e.target.value })}
+      />
+      <button className="btn btn-ghost btn-sm" onClick={() => patchHand({ playedTime: clockOf(new Date().toISOString()) })}>Now</button>
+      <button
+        className={'btn btn-ghost btn-sm' + (hand.playedTime ? '' : ' time-unknown-on')}
+        onClick={() => patchHand({ playedTime: '' })}
+      >
+        Unknown
+      </button>
+    </div>
+  );
 
   // ── All derived values (safe with null session via ?.) ──────────────────────
   const totalSeats = session?.totalSeats || 9;
@@ -505,6 +530,7 @@ export default function HandRecorder() {
       {/* Step 0: My Position */}
       {step === 0 && (
         <div>
+          {timeRow}
           <div className="pill-group mb-12">
             <button className={'pill' + (posMode === 'position' ? ' selected' : '')} onClick={() => choosePosMode('position')}>Position</button>
             <button className={'pill' + (posMode === 'button' ? ' selected' : '')} onClick={() => choosePosMode('button')}>Button seat</button>
@@ -753,6 +779,7 @@ export default function HandRecorder() {
       {/* Step 6: Result */}
       {step === 6 && (
         <div>
+          {timeRow}
           {/* Pot summary */}
           <div className="result-pot-card">
             <div className="result-pot-row">
