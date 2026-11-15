@@ -154,7 +154,7 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
   const next = ensureSeatCodes(session);
   const seats = next.seats.map(x => ({ ...x }));
   const get = (n) => seats.find(x => x.seatNum === n);
-  const cleared = { code: '', name: '', tags: [], estimatedStack: '', status: 'empty' };
+  const cleared = { code: '', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', status: 'empty' };
   const who = (x) => ({ code: x.code || '', name: x.name || '' });
   let mySeat = next.mySeat;
   let log;
@@ -183,7 +183,7 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
       const s = get(event.seat);
       // never reuse a code that anyone used earlier in this session
       const used = [...seats.map(x => x.code), ...next.seatLog.map(e => e.code)].filter(Boolean);
-      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', code: nextPlayerCode(used) });
+      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', code: nextPlayerCode(used) });
       log = { type: 'seated', seat: event.seat, code: s.code };
       break;
     }
@@ -191,7 +191,7 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
       const from = get(event.from), to = get(event.to);
       if (event.to === mySeat || event.to === event.from) throw new Error(`Can't move to seat ${event.to}`);
       vacate(event.to);
-      Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, status: 'active' });
+      Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, playerId: from.playerId || '', notes: from.notes || '', status: 'active' });
       log = { type: 'move', from: event.from, to: event.to, ...who(from) };
       Object.assign(from, cleared);
       break;
@@ -210,6 +210,18 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
       throw new Error(`Unknown seat event ${event.type}`);
   }
   return { ...next, mySeat, seats, seatLog: [...next.seatLog, ...pre, { at, ...log }] };
+}
+
+// Saved players whose nickname or notes contain `query` (case-insensitive),
+// name matches first, most recently seen first. Empty query → none.
+export function matchPlayers(players, query, limit = 5) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return [];
+  const score = (p) => ((p.name || '').toLowerCase().includes(q) ? 0 : (p.notes || '').toLowerCase().includes(q) ? 1 : 2);
+  return players
+    .filter(p => score(p) < 2)
+    .sort((a, b) => score(a) - score(b) || (b.lastSeen || b.createdAt || '').localeCompare(a.lastSeen || a.createdAt || ''))
+    .slice(0, limit);
 }
 
 export function describeSeatEvent(e) {

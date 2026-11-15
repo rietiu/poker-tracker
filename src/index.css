@@ -1068,6 +1068,45 @@ h3 { font-size: 1rem; font-weight: 600; }
   justify-content: center;
 }
 
+.known-player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.known-player-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.known-player-name { font-weight: 600; margin-right: 2px; }
+.known-player-notes { font-size: 0.72rem; color: var(--text2); width: 100%; }
+.known-player-linked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--green);
+}
+.known-player-remember {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text2);
+}
+
 .ssc-tag-mini {
   display: inline-block;
   padding: 0 4px;
