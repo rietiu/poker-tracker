@@ -1,17 +1,18 @@
 import { useState, useEffect } from 'react';
 import { getAll, put, del, getSessionsSorted } from '../db';
-import { uuid } from '../utils';
+import { uuid, describeLooks } from '../utils';
 import PlayerTag from '../components/PlayerTag';
-import { TagSelector } from '../components/PlayerTag';
+import { TagSelector, LookSelector } from '../components/PlayerTag';
 
 function PlayerForm({ initial, onSave, onCancel }) {
   const [name, setName] = useState(initial?.name || '');
   const [tags, setTags] = useState(initial?.tags || []);
   const [notes, setNotes] = useState(initial?.notes || '');
+  const [looks, setLooks] = useState(initial?.looks || []);
 
   function handleSave() {
     if (!name.trim()) return;
-    onSave({ name: name.trim(), tags, notes });
+    onSave({ name: name.trim(), tags, notes, looks });
   }
 
   return (
@@ -26,6 +27,11 @@ function PlayerForm({ initial, onSave, onCancel }) {
           onChange={e => setName(e.target.value)}
           autoFocus
         />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">外表 Looks</label>
+        <LookSelector selected={looks} onChange={setLooks} />
       </div>
 
       <div className="form-group">
@@ -225,6 +231,9 @@ export default function Players() {
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {(player.tags || []).map(t => <PlayerTag key={t} tag={t} />)}
                     </div>
+                    {(player.looks || []).length > 0 && (
+                      <div className="text-xs mt-8">{describeLooks(player.looks)}</div>
+                    )}
                     {player.notes && (
                       <div className="text-muted text-xs mt-8">{player.notes}</div>
                     )}

@@ -154,7 +154,7 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
   const next = ensureSeatCodes(session);
   const seats = next.seats.map(x => ({ ...x }));
   const get = (n) => seats.find(x => x.seatNum === n);
-  const cleared = { code: '', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', status: 'empty' };
+  const cleared = { code: '', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', looks: [], status: 'empty' };
   const who = (x) => ({ code: x.code || '', name: x.name || '' });
   let mySeat = next.mySeat;
   let log;
@@ -183,7 +183,7 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
       const s = get(event.seat);
       // never reuse a code that anyone used earlier in this session
       const used = [...seats.map(x => x.code), ...next.seatLog.map(e => e.code)].filter(Boolean);
-      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', code: nextPlayerCode(used) });
+      Object.assign(s, { status: 'active', name: '', tags: [], estimatedStack: '', playerId: '', notes: '', looks: [], code: nextPlayerCode(used) });
       log = { type: 'seated', seat: event.seat, code: s.code };
       break;
     }
@@ -191,7 +191,7 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
       const from = get(event.from), to = get(event.to);
       if (event.to === mySeat || event.to === event.from) throw new Error(`Can't move to seat ${event.to}`);
       vacate(event.to);
-      Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, playerId: from.playerId || '', notes: from.notes || '', status: 'active' });
+      Object.assign(to, { code: from.code, name: from.name, tags: from.tags, estimatedStack: from.estimatedStack, playerId: from.playerId || '', notes: from.notes || '', looks: from.looks || [], status: 'active' });
       log = { type: 'move', from: event.from, to: event.to, ...who(from) };
       Object.assign(from, cleared);
       break;
@@ -212,12 +212,20 @@ export function applySeatEvent(session, event, at = new Date().toISOString()) {
   return { ...next, mySeat, seats, seatLog: [...next.seatLog, ...pre, { at, ...log }] };
 }
 
-// Saved players whose nickname or notes contain `query` (case-insensitive),
-// name matches first, most recently seen first. Empty query → none.
-export function matchPlayers(players, query, limit = 5) {
+// Saved players matching what I see: nickname or notes contain `query`
+// (case-insensitive) AND they have every picked appearance key in `looks`.
+// Name matches first, then most recently seen. Nothing given → none.
+// Familiarity (面熟/面生) describes my memory, not the person, so it never
+// filters.
+export function matchPlayers(players, query, { looks = [], limit = 5 } = {}) {
   const q = (query || '').trim().toLowerCase();
-  if (!q) return [];
-  const score = (p) => ((p.name || '').toLowerCase().includes(q) ? 0 : (p.notes || '').toLowerCase().includes(q) ? 1 : 2);
+  const need = looks.filter(k => LOOK_META[k]?.group !== 'familiar');
+  if (!q && need.length === 0) return [];
+  const score = (p) => {
+    if (!need.every(k => (p.looks || []).includes(k))) return 2;
+    if (!q) return 0;
+    return (p.name || '').toLowerCase().includes(q) ? 0 : (p.notes || '').toLowerCase().includes(q) ? 1 : 2;
+  };
   return players
     .filter(p => score(p) < 2)
     .sort((a, b) => score(a) - score(b) || (b.lastSeen || b.createdAt || '').localeCompare(a.lastSeen || a.createdAt || ''))
@@ -430,13 +438,58 @@ export const TAG_META = {
   rock:   { emoji: '🪨', label: 'Rock',   short: 'Rock',   legacy: true, color: '#7d5a50' },
 };
 
-// Toggle `tag` in a selection; selecting a grouped tag removes its opposite.
-export function toggleTag(selected, tag) {
-  if (selected.includes(tag)) return selected.filter(t => t !== tag);
-  const group = TAG_META[tag]?.group;
-  const kept = group ? selected.filter(t => TAG_META[t]?.group !== group) : selected;
-  return [...kept, tag];
+// Toggle `key` in a selection; picking a grouped key replaces the one already
+// picked from that group (single choice per group).
+function toggleKey(meta, selected, key) {
+  if (selected.includes(key)) return selected.filter(t => t !== key);
+  const group = meta[key]?.group;
+  const kept = group ? selected.filter(t => meta[t]?.group !== group) : selected;
+  return [...kept, key];
 }
+export const toggleTag = (selected, tag) => toggleKey(TAG_META, selected, tag);
+
+// Appearance — how to recognise someone next time. Keys sharing a `group`
+// are single choice (one nationality, one age band…); `wear` items combine.
+export const LOOK_GROUPS = [
+  { id: 'nation', label: '國籍' },
+  { id: 'age', label: '年紀' },
+  { id: 'gender', label: '性別' },
+  { id: 'wear', label: '穿戴', multi: true },
+  { id: 'familiar', label: '面熟' },
+  { id: 'talk', label: '講話' },
+];
+export const LOOK_META = {
+  ph: { label: '菲律賓', group: 'nation' },
+  cn: { label: '華人', group: 'nation' },
+  kr: { label: '韓國', group: 'nation' },
+  jp: { label: '日本', group: 'nation' },
+  vn: { label: '越南', group: 'nation' },
+  in: { label: '印度', group: 'nation' },
+  west: { label: '西方人', group: 'nation' },
+  otherNation: { label: '其他', group: 'nation' },
+  a20: { label: '20幾', group: 'age' },
+  a30: { label: '30幾', group: 'age' },
+  a40: { label: '40幾', group: 'age' },
+  a50: { label: '50幾', group: 'age' },
+  a60: { label: '60+', group: 'age' },
+  male: { label: '男', group: 'gender' },
+  female: { label: '女', group: 'gender' },
+  glasses: { label: '眼鏡', wear: true },
+  cap: { label: '帽', wear: true },
+  jacket: { label: '外套', wear: true },
+  mask: { label: '口罩', wear: true },
+  headphones: { label: '耳機', wear: true },
+  familiar: { label: '面熟', group: 'familiar' },
+  stranger: { label: '面生', group: 'familiar' },
+  chatty: { label: '愛講話', group: 'talk' },
+  quiet: { label: '安靜', group: 'talk' },
+};
+export const toggleLook = (selected, key) => toggleKey(LOOK_META, selected, key);
+export const lookKeysIn = (groupId) =>
+  Object.keys(LOOK_META).filter(k => (groupId === 'wear' ? LOOK_META[k].wear : LOOK_META[k].group === groupId));
+// "韓國 · 40幾 · 眼鏡" in LOOK_META order.
+export const describeLooks = (looks = []) =>
+  Object.keys(LOOK_META).filter(k => looks.includes(k)).map(k => LOOK_META[k].label).join(' · ');
 
 // Tags the selector offers: every current tag, plus any legacy tag already
 // selected (so it can still be removed).

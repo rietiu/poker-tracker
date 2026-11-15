@@ -1,4 +1,30 @@
-import { TAG_META, toggleTag, selectableTags } from '../utils';
+import { TAG_META, toggleTag, selectableTags, LOOK_GROUPS, LOOK_META, toggleLook, lookKeysIn } from '../utils';
+
+// Appearance chips, one row per group (nationality, age, …). Single choice
+// within a group except 穿戴, where items combine.
+export function LookSelector({ selected = [], onChange }) {
+  return (
+    <div className="look-groups">
+      {LOOK_GROUPS.map(g => (
+        <div key={g.id} className="look-row">
+          <span className="look-row-label">{g.label}</span>
+          <div className="look-chips">
+            {lookKeysIn(g.id).map(k => (
+              <button
+                key={k}
+                type="button"
+                className={'look-chip' + (selected.includes(k) ? ' selected' : '')}
+                onClick={() => onChange(toggleLook(selected, k))}
+              >
+                {LOOK_META[k].label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function PlayerTag({ tag }) {
   const meta = TAG_META[tag];

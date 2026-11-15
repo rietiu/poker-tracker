@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getAll, put, del, getHandsBySession } from '../db';
-import { isRedCard, TAG_META, matchPlayers, uuid, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent } from '../utils';
+import { isRedCard, TAG_META, matchPlayers, toggleLook, describeLooks, uuid, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent } from '../utils';
 import PositionBadge from '../components/PositionBadge';
-import { TagSelector } from '../components/PlayerTag';
+import { TagSelector, LookSelector } from '../components/PlayerTag';
 
 function CardBadge({ card }) {
   if (!card) return null;
@@ -29,19 +29,22 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
   const [stack, setStack] = useState(String(s.estimatedStack || ''));
   const [tags, setTags] = useState(s.tags || []);
   const [notes, setNotes] = useState(s.notes || '');
+  const [looks, setLooks] = useState(s.looks || []);
   const [playerId, setPlayerId] = useState(s.playerId || '');
   const [remember, setRemember] = useState(true);
   const [showMoveMenu, setShowMoveMenu] = useState(false);
   const linked = players.find(p => p.id === playerId);
   // Saved players already sitting elsewhere at this table aren't offered.
   const seatedIds = new Set((session.seats || []).filter(x => x.seatNum !== seatNum && x.playerId).map(x => x.playerId));
-  const suggestions = linked ? [] : matchPlayers(players.filter(p => !seatedIds.has(p.id)), name);
+  const suggestions = linked ? [] : matchPlayers(players.filter(p => !seatedIds.has(p.id)), name, { looks });
 
   function pickPlayer(p) {
     setPlayerId(p.id);
     setName(p.name);
     setTags(p.tags || []);
     setNotes(p.notes || '');
+    // Their saved looks, with what I picked just now taking precedence.
+    setLooks(looks.reduce((acc, k) => (acc.includes(k) ? acc : toggleLook(acc, k)), p.looks || []));
   }
 
   function unlink() {
@@ -54,7 +57,7 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
   function saveDetails() {
     onSaveDetails(
       seatNum,
-      { name: name.trim(), tags, notes: notes.trim(), playerId, estimatedStack: stack ? Number(stack) : '' },
+      { name: name.trim(), tags, notes: notes.trim(), looks, playerId, estimatedStack: stack ? Number(stack) : '' },
       { remember: !playerId && remember && !!name.trim() },
     );
   }
@@ -104,11 +107,11 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
             {status === 'away' && <div className="seat-status-banner away-banner">Away from the table — not dealt in</div>}
 
             <div className="form-group">
-              <label className="form-label">Nickname <span className="text-muted text-xs">(code {s.code})</span></label>
+              <label className="form-label">外號 Nickname <span className="text-muted text-xs">(code {s.code})</span></label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
                   className="form-input"
-                  placeholder={`e.g. Korean, fast — or keep "${s.code}"`}
+                  placeholder={`e.g. 大叔、Rolex — or keep "${s.code}"`}
                   value={name}
                   onChange={e => setName(e.target.value)}
                   style={{ flex: 1 }}
@@ -117,10 +120,15 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
               </div>
               {linked && (
                 <div className="known-player-linked">
-                  <span>✓ Saved player — tags and notes update their profile</span>
+                  <span>✓ Saved player — changes here update their profile</span>
                   <button className="btn btn-ghost btn-sm" onClick={unlink}>Unlink</button>
                 </div>
               )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">外表 Looks</label>
+              <LookSelector selected={looks} onChange={setLooks} />
               {suggestions.length > 0 && (
                 <div className="known-player-list">
                   <div className="text-muted text-xs">Seen before?</div>
@@ -130,24 +138,27 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
                       {(p.tags || []).filter(t => TAG_META[t]).map(t => (
                         <span key={t} className="ssc-tag-mini" style={{ background: TAG_META[t].color }}>{TAG_META[t].short}</span>
                       ))}
+                      {(p.looks || []).length > 0 && <span className="known-player-notes">{describeLooks(p.looks)}</span>}
                       {p.notes && <span className="known-player-notes">{p.notes}</span>}
                     </button>
                   ))}
                 </div>
               )}
-              {!linked && name.trim() && (
+              {!linked && (name.trim() ? (
                 <label className="known-player-remember">
                   <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
                   Remember this player for future sessions
                 </label>
-              )}
+              ) : looks.length > 0 && (
+                <div className="known-player-remember">Give a nickname to remember this player.</div>
+              ))}
             </div>
 
             <div className="form-group">
-              <label className="form-label">How to recognise / notes</label>
+              <label className="form-label">Other notes</label>
               <input
                 className="form-input"
-                placeholder="e.g. red cap, always 3-bets the button"
+                placeholder="e.g. Rolex, tattoo, always on phone"
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
               />
@@ -261,9 +272,9 @@ export default function SessionView() {
     let player = null;
     if (patch.playerId) {
       const prev = players.find(p => p.id === patch.playerId);
-      if (prev) player = { ...prev, name: patch.name || prev.name, tags: patch.tags, notes: patch.notes, lastSeen: now };
+      if (prev) player = { ...prev, name: patch.name || prev.name, tags: patch.tags, notes: patch.notes, looks: patch.looks, lastSeen: now };
     } else if (remember) {
-      player = { id: uuid(), name: patch.name, tags: patch.tags, notes: patch.notes, createdAt: now, lastSeen: now };
+      player = { id: uuid(), name: patch.name, tags: patch.tags, notes: patch.notes, looks: patch.looks, createdAt: now, lastSeen: now };
       patch = { ...patch, playerId: player.id };
     }
     if (player) {
