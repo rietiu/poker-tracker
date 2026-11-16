@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSessionsSorted, getHandsBySession } from '../db';
-import { sumNet, parseBB, parseSB, formatSigned, sumByCurrency, formatGame, formatWhen } from '../utils';
+import { isMtt, totalInvested, entrySummary } from '../mtt';
+import { sumNet, parseBB, parseSB, currencySymbol, formatSigned, sumByCurrency, formatGame, formatWhen } from '../utils';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ export default function Home() {
         const hands = await getHandsBySession(session.id);
         const real = hands.filter(h => !h.incomplete);
         counts[session.id] = real.length;
-        nets[session.id] = sumNet(real, {
+        nets[session.id] = isMtt(session) ? 0 : sumNet(real, {
           sb: parseSB(session.game),
           bb: parseBB(session.game),
         });
@@ -32,7 +33,7 @@ export default function Home() {
   }, []);
 
   // Never add different currencies together: one total per currency.
-  const totals = sumByCurrency(sessions.map(s => ({ currency: s.currency, amount: netResults[s.id] || 0 })));
+  const totals = sumByCurrency(sessions.filter(s => !isMtt(s)).map(s => ({ currency: s.currency, amount: netResults[s.id] || 0 })));
 
 
   return (
@@ -71,10 +72,10 @@ export default function Home() {
               <div className="row-between">
                 <div>
                   <div style={{ fontWeight: 600 }}>{s.venue || 'Unnamed venue'}</div>
-                  <div className="text-muted text-sm">{formatGame(s.game, s.currency)} · {formatWhen(s.date)}</div>
+                  <div className="text-muted text-sm">{isMtt(s) ? `MTT · 總投入 ${currencySymbol(s.currency)}${totalInvested(s).toLocaleString()} · ${entrySummary(s)}` : `${formatGame(s.game, s.currency)} · ${formatWhen(s.date)}`}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(n, s.currency)}</div>
+                  {!isMtt(s) && <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(n, s.currency)}</div>}
                   <div className="text-muted text-xs">{handCounts[s.id] || 0} recorded {(handCounts[s.id] || 0) === 1 ? 'hand' : 'hands'}</div>
                 </div>
               </div>

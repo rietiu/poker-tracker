@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, del } from '../db';
-import { formatCard, formatMoney, isRedCard, handNet, heroInvested, parseBB, parseSB, currencySymbol, formatGame, formatWhen } from '../utils';
+import { formatCard, formatMoney, isRedCard, handNet, heroInvested, formatGame, formatWhen } from '../utils';
+import { isMtt, handBlinds, chipSym, currentLevel, levelLabel } from '../mtt';
 import PositionBadge from '../components/PositionBadge';
 
 
@@ -16,7 +17,7 @@ const ACTION_ZH = { fold: '弃牌', check: '过牌', call: '跟注', bet: '下�
 // ── Hand history generator ───────────────────────────────────────────────────
 function generateHandText(hand, session, lang) {
   const zh = lang === 'zh';
-  const sym = currencySymbol(session?.currency);
+  const sym = chipSym(session);
   const fmt = (n) => sym + Number(n).toLocaleString();
   const card = (c) => c ? formatCard(c) : '?';
   const cards = (arr) => (arr || []).filter(Boolean).map(card).join(' ');
@@ -250,7 +251,7 @@ export default function HandDetail() {
 
   if (!hand) return <div className="screen"><div className="text-muted">Loading…</div></div>;
 
-  const sym = currencySymbol(session?.currency);
+  const sym = chipSym(session);
   const { outcome, amount } = hand.result || {};
 
   function resultText() {
@@ -262,9 +263,9 @@ export default function HandDetail() {
   }
 
   const res = resultText();
-  const blinds = { sb: parseSB(session?.game), bb: parseBB(session?.game) };
+  const blinds = handBlinds(session, hand);
   const trueNet = handNet(hand, blinds);
-  const invested = heroInvested(hand, blinds.sb, blinds.bb);
+  const invested = heroInvested(hand, blinds.sb, blinds.bb, blinds.ante);
 
   async function handleDelete() {
     await del('hands', id);
@@ -287,6 +288,7 @@ export default function HandDetail() {
         <div className="row gap-8 mb-8">
           <PositionBadge position={hand.myPosition} />
           {session && <span className="text-muted text-sm">{session.venue || formatGame(session.game, session.currency)}</span>}
+          {isMtt(session) && levelLabel(hand.blinds || currentLevel(session)) && <span className="text-muted text-sm">· {levelLabel(hand.blinds || currentLevel(session))}</span>}
           {hand.playedAt && <span className="text-muted text-sm">· {formatWhen(hand.playedAt)}</span>}
         </div>
         <div className="row gap-8">
