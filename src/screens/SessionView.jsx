@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getAll, put, del, getHandsBySession } from '../db';
-import { isRedCard, TAG_META, matchPlayers, toggleLook, describeLooks, uuid, randomPlayerName, sumNet, handNet, parseBB, parseSB, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent, clockOf } from '../utils';
+import { isRedCard, TAG_META, matchPlayers, toggleLook, describeLooks, uuid, randomPlayerName, handNet, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent, clockOf } from '../utils';
+import { isMtt, currentLevel, totalInvested, entrySummary, bbCount, nextLevelDraft, chipSym, handBlinds, ENTRY_TYPES, levelLabel } from '../mtt';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector, LookSelector } from '../components/PlayerTag';
 
@@ -195,7 +196,9 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
 
 function SeatGrid({ session, onSeatTap }) {
   const { seats = [], mySeat, totalSeats } = session;
-  const sym = currencySymbol(session.currency);
+  const sym = chipSym(session);
+  const mtt = isMtt(session);
+  const bb = currentLevel(session)?.bb;
   return (
     <div className="session-seat-grid">
       {Array.from({ length: totalSeats }, (_, i) => i + 1).map(n => {
@@ -214,7 +217,10 @@ function SeatGrid({ session, onSeatTap }) {
             </div>
             {!isMe && status !== 'empty' && seat.name && seat.code && <div className="ssc-code">{seat.code}</div>}
             {status !== 'empty' && seat.estimatedStack ? (
-              <div className="ssc-stack">{sym}{Number(seat.estimatedStack).toLocaleString()}</div>
+              <div className="ssc-stack">
+                {sym}{Number(seat.estimatedStack).toLocaleString()}
+                {mtt && bbCount(seat.estimatedStack, bb) != null && ` (${bbCount(seat.estimatedStack, bb)} BB)`}
+              </div>
             ) : null}
             {status !== 'empty' && (seat.tags || []).length > 0 && (
               <div className="ssc-tags">
@@ -240,6 +246,8 @@ export default function SessionView() {
   const [hands, setHands] = useState([]);
   const [editingSeat, setEditingSeat] = useState(null); // seatNum or null
   const [players, setPlayers] = useState([]); // saved player profiles
+  const [panel, setPanel] = useState(null); // MTT: 'level' | 'entry' | null
+  const [draft, setDraft] = useState({});
 
   useEffect(() => { getAll('players').then(setPlayers); }, []);
 
@@ -295,16 +303,46 @@ export default function SessionView() {
 
   const completedHands = hands.filter(h => !h.incomplete);
 
-  const blinds = { sb: parseSB(session.game), bb: parseBB(session.game) };
-  const netResult = sumNet(completedHands, blinds);
+  const mtt = isMtt(session);
+  const netOf = (hand) => handNet(hand, handBlinds(session, hand));
+  const netResult = completedHands.reduce((s, h) => s + netOf(h), 0);
+
+  function openLevelPanel() {
+    const d = nextLevelDraft(session);
+    setDraft({ sb: String(d.sb || ''), bb: String(d.bb || ''), ante: String(d.ante || '') });
+    setPanel('level');
+  }
+
+  function openEntryPanel() {
+    const bi = session.buyIn || {};
+    setDraft({ type: 'reentry', amount: String((Number(bi.prize) || 0) + (Number(bi.fee) || 0) || ''), chips: String(session.startingStack || '') });
+    setPanel('entry');
+  }
+
+  async function confirmLevel() {
+    const d = draft;
+    const cur = currentLevel(session);
+    await saveSession({ ...session, levels: [...(session.levels || []), {
+      level: (cur?.level || 0) + 1, sb: Number(d.sb), bb: Number(d.bb), ante: Number(d.ante) || 0, at: new Date().toISOString(),
+    }] });
+    setPanel(null);
+  }
+
+  async function confirmEntry() {
+    const d = draft;
+    await saveSession({ ...session, entries: [...(session.entries || []), {
+      type: d.type, amount: Number(d.amount) || 0, chips: Number(d.chips) || 0, at: new Date().toISOString(),
+    }] });
+    setPanel(null);
+  }
 
   function resultClass(hand) {
     if (hand.result?.outcome === 'folded') return 'result-fold';
-    return handNet(hand, blinds) >= 0 ? 'result-won' : 'result-lost';
+    return netOf(hand) >= 0 ? 'result-won' : 'result-lost';
   }
 
   function resultText(hand) {
-    const n = handNet(hand, blinds);
+    const n = netOf(hand);
     if (hand.result?.outcome === 'folded') return n < 0 ? `Fold −${Math.abs(n).toLocaleString()}` : 'Fold';
     return (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString();
   }
@@ -319,13 +357,29 @@ export default function SessionView() {
         <button className="back-btn" onClick={() => navigate('/')}>← Back</button>
         <div style={{ flex: 1 }}>
           <h1>{session.venue || 'Unnamed venue'}</h1>
-          <div className="text-muted text-sm">{formatGame(session.game, session.currency)} · {session.totalSeats}-handed · started {clockOf(session.date)}</div>
+          {mtt
+            ? <div className="text-muted text-sm">MTT · {levelLabel(currentLevel(session))} · {session.totalSeats}-handed · started {clockOf(session.date)}</div>
+            : <div className="text-muted text-sm">{formatGame(session.game, session.currency)} · {session.totalSeats}-handed · started {clockOf(session.date)}</div>}
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className={netResult >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(netResult, session.currency)}</div>
-          <div className="text-muted text-xs">{completedHands.length} recorded {completedHands.length === 1 ? 'hand' : 'hands'}</div>
-        </div>
+        {mtt ? (
+          <div style={{ textAlign: 'right' }}>
+            <div>總投入 {currencySymbol(session.currency)}{totalInvested(session).toLocaleString()}</div>
+            <div className="text-muted text-xs">{entrySummary(session)} · {completedHands.length} hands</div>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'right' }}>
+            <div className={netResult >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(netResult, session.currency)}</div>
+            <div className="text-muted text-xs">{completedHands.length} recorded {completedHands.length === 1 ? 'hand' : 'hands'}</div>
+          </div>
+        )}
       </div>
+
+      {mtt && (
+        <div className="row gap-8 mb-8">
+          <button className="btn btn-secondary btn-sm" onClick={openLevelPanel}>⬆ 升盲</button>
+          <button className="btn btn-secondary btn-sm" onClick={openEntryPanel}>＋ Re-entry / Rebuy / Add-on</button>
+        </div>
+      )}
 
       {/* Draft banners — one per incomplete hand */}
       {hands.filter(h => h.incomplete).map(draft => (
@@ -422,6 +476,52 @@ export default function SessionView() {
         </div>
       </div>
 
+      {mtt && panel === 'level' && (
+        <div className="sheet-overlay" onClick={() => setPanel(null)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-header">
+              <h2>⬆ 升盲</h2>
+              <button className="back-btn" style={{ minHeight: 'auto', paddingRight: 0 }} onClick={() => setPanel(null)}>✕</button>
+            </div>
+            <div className="text-muted text-xs mb-8">新級別 Lv{(currentLevel(session)?.level || 0) + 1}</div>
+            {[['sb', 'SB'], ['bb', 'BB'], ['ante', 'BB ante']].map(([k, label]) => (
+              <div className="form-group" key={k}>
+                <label className="form-label">{label}</label>
+                <input type="number" className="form-input" placeholder="0" value={draft[k] ?? ''} onChange={e => setDraft({ ...draft, [k]: e.target.value })} inputMode="numeric" />
+              </div>
+            ))}
+            <button className="btn btn-primary btn-full mb-8" disabled={!(Number(draft.sb) > 0 && Number(draft.bb) > 0)} onClick={confirmLevel}>確認升盲</button>
+          </div>
+        </div>
+      )}
+
+      {mtt && panel === 'entry' && (
+        <div className="sheet-overlay" onClick={() => setPanel(null)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-header">
+              <h2>＋ Re-entry / Rebuy / Add-on</h2>
+              <button className="back-btn" style={{ minHeight: 'auto', paddingRight: 0 }} onClick={() => setPanel(null)}>✕</button>
+            </div>
+            <div className="form-group">
+              <div className="pill-group">
+                {ENTRY_TYPES.map(t => (
+                  <button key={t.type} className={'pill' + (draft.type === t.type ? ' selected' : '')} onClick={() => setDraft({ ...draft, type: t.type })}>{t.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">金額 ({currencySymbol(session.currency)})</label>
+              <input type="number" className="form-input" placeholder="0" value={draft.amount ?? ''} onChange={e => setDraft({ ...draft, amount: e.target.value })} inputMode="numeric" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">籌碼 Chips</label>
+              <input type="number" className="form-input" placeholder="0" value={draft.chips ?? ''} onChange={e => setDraft({ ...draft, chips: e.target.value })} inputMode="numeric" />
+            </div>
+            <button className="btn btn-primary btn-full mb-8" onClick={confirmEntry}>確認</button>
+          </div>
+        </div>
+      )}
+
       {editingSeat !== null && (
         <SeatEditSheet
           key={editingSeat}
@@ -429,7 +529,7 @@ export default function SessionView() {
           seat={editingSeatData}
           isMySeat={editingSeat === session.mySeat}
           session={session}
-          sym={currencySymbol(session.currency)}
+          sym={chipSym(session)}
           players={players}
           onSaveDetails={handleSaveDetails}
           onEvent={handleSeatEvent}
