@@ -33,6 +33,7 @@ function actionBadge(action, amount, sym, allIn) {
  *
  * Props:
  *   totalSeats, street, myPosition, activePositions, actions, startPot, bb, sb, currency
+ *   sym                         — optional chip prefix; '' hides it (MTT). Defaults to currencySymbol(currency)
  *   onChange(actions, endPot)   — stored actions for this street
  *   onComplete(actions)         — street finished (closed actions, or hero folded)
  *   prevPreflopActions          — previous hand's pre-flop actions ("Same as last hand")
@@ -51,6 +52,7 @@ export default function PositionSequencer({
   bb = 2,
   sb = null,
   currency = 'USD',
+  sym: symProp,
   onComplete = null,
   prevPreflopActions = null,
   allInBefore = [],
@@ -59,7 +61,7 @@ export default function PositionSequencer({
   backLabel = 'Back',
   cbet = null,
 }) {
-  const sym = currencySymbol(currency);
+  const sym = symProp !== undefined ? symProp : currencySymbol(currency);
   const isPreflop = street === 'preflop';
   const sbVal = sb != null ? sb : Math.round(bb / 2);
   const roundToBB = (amount) => (bb > 0 ? Math.round(amount / bb) * bb : Math.round(amount));

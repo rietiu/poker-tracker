@@ -638,6 +638,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('preflop', acts, tablePositions)}
             prevPreflopActions={prevPreflopActions}
             onBack={() => setStep(1)}
@@ -683,6 +684,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('flop', acts, flopActivePositions)}
             locked={boardLock.flop}
             onBack={() => setStep(2)}
@@ -728,6 +730,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('turn', acts, turnActivePositions)}
             locked={boardLock.turn}
             onBack={() => setStep(3)}
@@ -773,6 +776,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('river', acts, riverActivePositions)}
             locked={boardLock.river}
             onBack={() => setStep(4)}
