@@ -70,6 +70,25 @@ export default function SessionSetup() {
   const [profileKey, setProfileKey] = useState('');    // picked profile
   const [showDetails, setShowDetails] = useState(false); // profile picked → settings collapsed unless "Change"
   const [showAllProfiles, setShowAllProfiles] = useState(false);
+  const [kind, setKind] = useState(() => {
+    try { return localStorage.getItem('pt.lastKind') === 'mtt' ? 'mtt' : 'cash'; } catch { return 'cash'; }
+  });
+  const [buyPrize, setBuyPrize] = useState('');
+  const [buyFee, setBuyFee] = useState('');
+  const [startingStack, setStartingStack] = useState('');
+  const [lv, setLv] = useState({ sb: '', bb: '', ante: '', bbAuto: true, anteAuto: true });
+  const isMtt = kind === 'mtt';
+
+  function updateLv(patch) {
+    setLv(prev => {
+      const next = { ...prev, ...patch };
+      if ('sb' in patch && next.bbAuto) next.bb = patch.sb === '' ? '' : String(Number(patch.sb) * 2);
+      if ('bb' in patch) next.bbAuto = false;
+      if (('sb' in patch || 'bb' in patch) && next.anteAuto) next.ante = next.bb;   // BB ante usually equals the BB
+      if ('ante' in patch) next.anteAuto = false;
+      return next;
+    });
+  }
 
   useEffect(() => {
     getSessionsSorted().then(all => {
@@ -142,7 +161,7 @@ export default function SessionSetup() {
   const profiles = sessionProfiles(allSessions);
   const visibleProfiles = showAllProfiles ? profiles : profiles.slice(0, 5);
   const selectedProfile = profiles.find(p => p.key === profileKey) || null;
-  const collapsed = !!selectedProfile && !showDetails;
+  const collapsed = !isMtt && !!selectedProfile && !showDetails;
 
   function applyProfile(p) {
     setVenue(p.venue);
@@ -169,6 +188,10 @@ export default function SessionSetup() {
     setRakeSource('');
   }
 
+  const canStart = isMtt
+    ? Number(buyPrize) > 0 && Number(startingStack) > 0 && Number(lv.sb) > 0 && Number(lv.bb) > 0
+    : !!effectiveGame;
+
   async function handleStart() {
     // Every other seat starts occupied with a default code (A, B, C…); rename the
     // players worth remembering, mark seats away / empty from the session table.
@@ -187,20 +210,31 @@ export default function SessionSetup() {
       id: uuid(),
       date: sessionStartFrom(startTime), // when play started (editable), not when this was typed
       venue: venue.trim(),
-      game: effectiveGame,
       currency,
       totalSeats,
-      rakeType,
-      rake: rake !== '' ? Number(rake) : null,
-      rakeMax: rakeMax !== '' ? Number(rakeMax) : 0,
-      jackpot: jackpot !== '' ? Number(jackpot) : 0,
-      rakeRoundUnit: rakeRoundUnit !== '' ? Number(rakeRoundUnit) : 0,
-      rakeRoundMode,
-      myStack: Number(myStack) || 0,
       mySeat,
       seats: seatArr,
       seatLog: [],
       createdAt: new Date().toISOString(),
+      ...(isMtt ? {
+        kind: 'mtt',
+        game: '',
+        buyIn: { prize: Number(buyPrize) || 0, fee: Number(buyFee) || 0 },
+        startingStack: Number(startingStack) || 0,
+        entries: [{ type: 'buyin', amount: (Number(buyPrize) || 0) + (Number(buyFee) || 0), chips: Number(startingStack) || 0, at: sessionStartFrom(startTime) }],
+        levels: [{ level: 1, sb: Number(lv.sb), bb: Number(lv.bb), ante: Number(lv.ante) || 0, at: sessionStartFrom(startTime) }],
+        myStack: Number(startingStack) || 0,
+        rake: null, rakeMax: 0, jackpot: 0,
+      } : {
+        game: effectiveGame,
+        rakeType,
+        rake: rake !== '' ? Number(rake) : null,
+        rakeMax: rakeMax !== '' ? Number(rakeMax) : 0,
+        jackpot: jackpot !== '' ? Number(jackpot) : 0,
+        rakeRoundUnit: rakeRoundUnit !== '' ? Number(rakeRoundUnit) : 0,
+        rakeRoundMode,
+        myStack: Number(myStack) || 0,
+      }),
     };
 
     await put('sessions', session);
@@ -214,7 +248,16 @@ export default function SessionSetup() {
         <h1>New Session</h1>
       </div>
 
-      {profiles.length > 0 && (
+      <div className="pill-group mb-8">
+        {[['cash', 'Cash game'], ['mtt', 'MTT']].map(([k, label]) => (
+          <button key={k} className={'pill' + (kind === k ? ' selected' : '')}
+                  onClick={() => { setKind(k); try { localStorage.setItem('pt.lastKind', k); } catch { /* private mode */ } }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {!isMtt && profiles.length > 0 && (
         <div className="form-group">
           <label className="form-label">Pick a profile</label>
           <div className="profile-list">
@@ -276,6 +319,29 @@ export default function SessionSetup() {
         />
       </div>
 
+      {isMtt && (<>
+      <div className="form-group">
+        <label className="form-label">Buy-in</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input className="form-input" inputMode="decimal" placeholder="Prize pool" value={buyPrize} onChange={e => setBuyPrize(e.target.value)} />
+          <input className="form-input" inputMode="decimal" placeholder="Fee（可留空）" value={buyFee} onChange={e => setBuyFee(e.target.value)} />
+        </div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Starting stack（籌碼）</label>
+        <input className="form-input" inputMode="numeric" value={startingStack} onChange={e => setStartingStack(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Level 1 盲注</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input className="form-input" inputMode="numeric" placeholder="SB" value={lv.sb} onChange={e => updateLv({ sb: e.target.value })} />
+          <input className="form-input" inputMode="numeric" placeholder="BB" value={lv.bb} onChange={e => updateLv({ bb: e.target.value })} />
+          <input className="form-input" inputMode="numeric" placeholder="BB ante" value={lv.ante} onChange={e => updateLv({ ante: e.target.value })} />
+        </div>
+      </div>
+      </>)}
+
+      {!isMtt && (
       <div className="form-group">
         <label className="form-label">Game / Blinds</label>
         {gameOptions.length > 0 && (
@@ -343,6 +409,7 @@ export default function SessionSetup() {
           </div>
         )}
       </div>
+      )}
 
       <div className="form-group">
         <label className="form-label">Table Size</label>
@@ -376,6 +443,7 @@ export default function SessionSetup() {
         </div>
       </div>
 
+      {!isMtt && (
       <div className="form-group">
         <label className="form-label">My Starting Stack</label>
         <input
@@ -387,8 +455,9 @@ export default function SessionSetup() {
           inputMode="numeric"
         />
       </div>
+      )}
 
-      {!collapsed && (<>
+      {!collapsed && !isMtt && (<>
       <div className="form-group">
         <label className="form-label">Commission / Rake <span className="text-muted text-xs">(optional)</span></label>
         {rakeSource && (
@@ -477,7 +546,7 @@ export default function SessionSetup() {
       </div>
 
       <div style={{ paddingBottom: 24 }}>
-        <button className="btn btn-primary btn-full" onClick={handleStart} disabled={!effectiveGame} style={{ opacity: effectiveGame ? 1 : 0.5 }}>
+        <button className="btn btn-primary btn-full" onClick={handleStart} disabled={!canStart} style={{ opacity: canStart ? 1 : 0.5 }}>
           Start Session
         </button>
       </div>
