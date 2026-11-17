@@ -266,6 +266,7 @@ export default function HandDetail() {
   const blinds = handBlinds(session, hand);
   const trueNet = handNet(hand, blinds);
   const invested = heroInvested(hand, blinds.sb, blinds.bb, blinds.ante);
+  const levelText = isMtt(session) ? levelLabel(hand.blinds || currentLevel(session)) : '';
 
   async function handleDelete() {
     await del('hands', id);
@@ -288,7 +289,7 @@ export default function HandDetail() {
         <div className="row gap-8 mb-8">
           <PositionBadge position={hand.myPosition} />
           {session && <span className="text-muted text-sm">{session.venue || formatGame(session.game, session.currency)}</span>}
-          {isMtt(session) && levelLabel(hand.blinds || currentLevel(session)) && <span className="text-muted text-sm">· {levelLabel(hand.blinds || currentLevel(session))}</span>}
+          {levelText && <span className="text-muted text-sm">· {levelText}</span>}
           {hand.playedAt && <span className="text-muted text-sm">· {formatWhen(hand.playedAt)}</span>}
         </div>
         <div className="row gap-8">

@@ -166,7 +166,7 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
             </div>
 
             <div className="form-group">
-              <label className="form-label">Est. Stack ({sym})</label>
+              <label className="form-label">Est. Stack ({isMtt(session) ? 'chips' : sym})</label>
               <input type="number" className="form-input" placeholder="0" value={stack} onChange={e => setStack(e.target.value)} inputMode="numeric" />
             </div>
 
@@ -382,23 +382,23 @@ export default function SessionView() {
       )}
 
       {/* Draft banners — one per incomplete hand */}
-      {hands.filter(h => h.incomplete).map(draft => (
-        <div key={draft.id} className="draft-banner">
+      {hands.filter(h => h.incomplete).map(h => (
+        <div key={h.id} className="draft-banner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span>Unfinished hand</span>
-            {draft.myPosition && <span className="text-muted text-sm">· {draft.myPosition}</span>}
-            {(draft.holeCards || []).filter(Boolean).map((c, i) => (
+            {h.myPosition && <span className="text-muted text-sm">· {h.myPosition}</span>}
+            {(h.holeCards || []).filter(Boolean).map((c, i) => (
               <CardBadge key={i} card={c} />
             ))}
-            {draft.draftState?.step != null && (
-              <span className="text-muted text-sm">step {draft.draftState.step + 1}/7</span>
+            {h.draftState?.step != null && (
+              <span className="text-muted text-sm">step {h.draftState.step + 1}/7</span>
             )}
           </div>
           <div className="draft-banner-btns">
-            <button className="btn btn-primary btn-sm" onClick={() => navigate(`/session/${id}/record/${draft.id}`)}>
+            <button className="btn btn-primary btn-sm" onClick={() => navigate(`/session/${id}/record/${h.id}`)}>
               Continue
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => discardDraft(draft.id)}>
+            <button className="btn btn-secondary btn-sm" onClick={() => discardDraft(h.id)}>
               Discard
             </button>
           </div>

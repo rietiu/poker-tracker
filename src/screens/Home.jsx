@@ -72,7 +72,7 @@ export default function Home() {
               <div className="row-between">
                 <div>
                   <div style={{ fontWeight: 600 }}>{s.venue || 'Unnamed venue'}</div>
-                  <div className="text-muted text-sm">{isMtt(s) ? `MTT · 總投入 ${currencySymbol(s.currency)}${totalInvested(s).toLocaleString()} · ${entrySummary(s)}` : `${formatGame(s.game, s.currency)} · ${formatWhen(s.date)}`}</div>
+                  <div className="text-muted text-sm">{isMtt(s) ? [`MTT · 總投入 ${currencySymbol(s.currency)}${totalInvested(s).toLocaleString()}`, entrySummary(s), formatWhen(s.date)].filter(Boolean).join(' · ') : `${formatGame(s.game, s.currency)} · ${formatWhen(s.date)}`}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   {!isMtt(s) && <div className={n >= 0 ? 'result-won' : 'result-lost'}>{formatSigned(n, s.currency)}</div>}
