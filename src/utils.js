@@ -649,15 +649,16 @@ function positionStreetContribution(actions, pos, seed = 0) {
 }
 
 // The blind hero posted this hand (0 unless hero is in SB/BB).
-export function heroBlindPosted(hand, sb = 1, bb = 2) {
+export function heroBlindPosted(hand, sb = 1, bb = 2, ante = 0) {
   if (hand?.myPosition === 'SB') return sb;
-  if (hand?.myPosition === 'BB') return bb;
+  if (hand?.myPosition === 'BB') return bb + (Number(ante) || 0);
   return 0;
 }
 
 // Total chips hero put into the pot across all streets (voluntary + own blind).
 // 0 for quick hands (they store no action lists).
-export function heroInvested(hand, sb = 1, bb = 2) {
+// A BB ante is dead money: added after the loop, never seeded as chips to call.
+export function heroInvested(hand, sb = 1, bb = 2, ante = 0) {
   if (!hand || hand.quick || !hand.myPosition) return 0;
   const pos = hand.myPosition;
   let total = 0;
@@ -666,6 +667,7 @@ export function heroInvested(hand, sb = 1, bb = 2) {
     const seed = st === 'preflop' ? heroBlindPosted(hand, sb, bb) : 0;
     total += positionStreetContribution(actions, pos, seed);
   }
+  if (pos === 'BB') total += Number(ante) || 0;
   return total;
 }
 
@@ -673,6 +675,7 @@ export function heroInvested(hand, sb = 1, bb = 2) {
 export function handNet(hand, opts = {}) {
   const sb = opts.sb ?? 1;
   const bb = opts.bb ?? 2;
+  const ante = opts.ante ?? 0;
   const r = hand?.result || {};
   const amt = Number(r.amount) || 0;
 
@@ -681,24 +684,24 @@ export function handNet(hand, opts = {}) {
     // Quick hands have no action lists — trust the typed amount as the net.
     if (r.outcome === 'won' || r.outcome === 'split') net = amt;
     else if (r.outcome === 'lost') net = -Math.abs(amt);
-    else if (r.outcome === 'folded') net = -heroBlindPosted(hand, sb, bb);
+    else if (r.outcome === 'folded') net = -heroBlindPosted(hand, sb, bb, ante);
   } else {
     switch (r.outcome) {
       case 'won':
-        net = amt - heroInvested(hand, sb, bb);
+        net = amt - heroInvested(hand, sb, bb, ante);
         break;
       case 'lost': {
-        const invested = heroInvested(hand, sb, bb);
+        const invested = heroInvested(hand, sb, bb, ante);
         net = invested > 0 ? -invested : -Math.abs(amt);
         break;
       }
       case 'split':
         // typed amount = hero's share of the pot (gross), same meaning as won
-        net = amt - heroInvested(hand, sb, bb);
+        net = amt - heroInvested(hand, sb, bb, ante);
         break;
       case 'folded':
         // heroInvested already includes hero's own blind
-        net = -heroInvested(hand, sb, bb);
+        net = -heroInvested(hand, sb, bb, ante);
         break;
       default:
         net = 0;

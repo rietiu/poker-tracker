@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
-import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, currencySymbol, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint, clockOf, handTimeFrom } from '../utils';
+import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint, clockOf, handTimeFrom } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
+import { isMtt, handBlinds, chipSym, bbCount, currentLevel, levelLabel } from '../mtt';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
 import PositionBadge from '../components/PositionBadge';
@@ -56,6 +57,8 @@ export default function HandRecorder() {
 
   const [bb, setBb] = useState(2);
   const [sb, setSb] = useState(1);
+  const [ante, setAnte] = useState(0);
+  const [handLevel, setHandLevel] = useState(null); // MTT: level snapshot for this hand
   const [draftId, setDraftId] = useState(null);
   const [editRecord, setEditRecord] = useState(null); // original record when editing
   const [pendingRake, setPendingRake] = useState('');
@@ -76,6 +79,7 @@ export default function HandRecorder() {
   useEffect(() => {
     async function init() {
       let sid = routeSessionId;
+      let existingBlinds;
 
       if (isEditMode) {
         // ── Edit a completed hand ─────────────────────────────────────────────
@@ -84,6 +88,7 @@ export default function HandRecorder() {
         sid = record.sessionId;
         setResolvedSessionId(sid);
         setEditRecord(record);
+        existingBlinds = record.blinds;
         setHand({
           myPosition: record.myPosition || '',
           holeCards: record.holeCards || [null, null],
@@ -120,6 +125,7 @@ export default function HandRecorder() {
         if (record?.incomplete) {
           sid = record.sessionId;
           setResolvedSessionId(sid);
+          existingBlinds = record.draftState?.blinds ?? record.blinds;
           setDraftId(resumeId); // reuse the same draft ID so auto-save overwrites it
           if (record.draftState?.hand) {
             // Merge with default structure to guard against older draft formats
@@ -153,7 +159,13 @@ export default function HandRecorder() {
 
       const s = await get('sessions', sid);
       setSession(s);
-      if (s) { setBb(parseBB(s.game)); setSb(parseSB(s.game)); }
+      if (s) {
+        if (isMtt(s)) {
+          const snap = existingBlinds || currentLevel(s);
+          const b = handBlinds(s, { blinds: snap });
+          setSb(b.sb); setBb(b.bb); setAnte(b.ante); setHandLevel(snap);
+        } else { setBb(parseBB(s.game)); setSb(parseSB(s.game)); }
+      }
     }
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -170,11 +182,12 @@ export default function HandRecorder() {
         createdAt: new Date().toISOString(),
         myPosition: hand.myPosition,
         holeCards: hand.holeCards,
+        ...(isMtt(session) ? { blinds: handLevel } : {}),
         draftState: { step, hand },
       });
     }, 600);
     return () => clearTimeout(timer);
-  }, [hand, step, draftId, resolvedSessionId, isEditMode]);
+  }, [hand, step, draftId, resolvedSessionId, isEditMode, session, handLevel]);
 
   function patchHand(patch) {
     setHand(prev => ({ ...prev, ...patch }));
@@ -263,6 +276,7 @@ export default function HandRecorder() {
       buttonSeat: buttonSeat || null,
       // who sat where for this hand — the basis for per-player notes later
       seating: buttonSeat ? seatingAtHand(session?.seats, activeSeats, mySeatNum, buttonSeat) : null,
+      ...(isMtt(session) ? { blinds: handLevel } : {}),
       myPosition: hand.myPosition,
       holeCards: hand.holeCards,
       preflop: {
@@ -334,7 +348,9 @@ export default function HandRecorder() {
   const mySeatNum = session?.mySeat || 1;
   const buttonSeat = buttonSeatAmong(activeSeats, mySeatNum, hand.myPosition);
   const currency = session?.currency || 'USD';
-  const sym = currencySymbol(currency);
+  const sym = chipSym(session);
+  const mtt = isMtt(session);
+  const bbTag = (x) => (mtt && bbCount(x, bb) != null ? ` (${bbCount(x, bb)} BB)` : '');
   const usedCards = allCards(hand);
   const progress = ((step + 1) / TOTAL) * 100;
   const showStickyBar = step >= 2;
@@ -346,7 +362,7 @@ export default function HandRecorder() {
   const turnFolded = getFoldedPositions(hand.turn.actions);
   const riverActivePositions = turnActivePositions.filter(p => !turnFolded.has(p));
 
-  const preflopStartPot = sb + bb;
+  const preflopStartPot = sb + bb + ante;
   const flopStartPot = hand.preflop.endPot || preflopStartPot;
   const turnStartPot = hand.flop.endPot || flopStartPot;
   const riverStartPot = hand.turn.endPot || turnStartPot;
@@ -354,7 +370,7 @@ export default function HandRecorder() {
   // ── Pots, side pots, rake (src/pots.js) ──────────────────────────────────────
   const STREETS = ['preflop', 'flop', 'turn', 'river'];
   const handForCalc = Object.fromEntries(STREETS.map(st => [st, { actions: hand[st].actions }]));
-  const { pots, uncalled } = buildPots(handContributions(handForCalc, sb, bb), foldedPositions(handForCalc));
+  const { pots, uncalled } = buildPots(handContributions(handForCalc, sb, bb, ante), foldedPositions(handForCalc), ante);
   const calledPot = pots.reduce((n, p) => n + p.amount, 0);
   const preflopOnly = endedPreflop(handForCalc);
   const rakeInfo = computeRake(calledPot, preflopOnly, session);
@@ -399,7 +415,7 @@ export default function HandRecorder() {
     const moved = relocateHero(Object.fromEntries(STREETS.map(st => [st, hand[st].actions])), old, pos, { totalSeats: dealtCount, sb, bb });
     const potThrough = (k) => {
       const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(st => [st, { actions: moved[st] || [] }]));
-      return Object.values(handContributions(partial, sb, bb)).reduce((a, b) => a + b, 0);
+      return Object.values(handContributions(partial, sb, bb, ante)).reduce((a, b) => a + b, 0);
     };
     setHand(prev => {
       const next = { ...prev, myPosition: pos, result: { outcome: '', amount: '', notes: prev.result.notes || '', winner: '' } };
@@ -435,7 +451,7 @@ export default function HandRecorder() {
       STREETS.forEach((st, k) => {
         const acts = STREETS.indexOf(street) >= k ? streets[st] : (checked[st] || []);
         const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(x => [x, { actions: x === st ? acts : next[x].actions }]));
-        cumulative = Object.values(handContributions(partial, sb, bb)).reduce((a, b) => a + b, 0);
+        cumulative = Object.values(handContributions(partial, sb, bb, ante)).reduce((a, b) => a + b, 0);
         next[st] = { ...prev[st], actions: acts, endPot: acts.length ? cumulative : 0 };
       });
       return next;
@@ -622,6 +638,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('preflop', acts, tablePositions)}
             prevPreflopActions={prevPreflopActions}
             onBack={() => setStep(1)}
@@ -667,6 +684,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('flop', acts, flopActivePositions)}
             locked={boardLock.flop}
             onBack={() => setStep(2)}
@@ -712,6 +730,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('turn', acts, turnActivePositions)}
             locked={boardLock.turn}
             onBack={() => setStep(3)}
@@ -757,6 +776,7 @@ export default function HandRecorder() {
             bb={bb}
             sb={sb}
             currency={currency}
+            sym={sym}
             onComplete={acts => afterStreet('river', acts, riverActivePositions)}
             locked={boardLock.river}
             onBack={() => setStep(4)}
@@ -780,11 +800,12 @@ export default function HandRecorder() {
       {step === 6 && (
         <div>
           {timeRow}
+          {mtt && handLevel && <div className="text-muted text-xs mb-8">{levelLabel(handLevel)}</div>}
           {/* Pot summary */}
           <div className="result-pot-card">
             <div className="result-pot-row">
               <span>Final pot</span>
-              <strong>{sym}{calledPot.toLocaleString()}</strong>
+              <strong>{sym}{calledPot.toLocaleString()}{bbTag(calledPot)}</strong>
             </div>
             {multiPot && pots.map((p, i) => (
               <div key={i} className="result-pot-row text-muted text-sm">
@@ -817,12 +838,12 @@ export default function HandRecorder() {
             )}
             <div className="result-pot-row result-pot-net">
               <span>Net pot</span>
-              <strong>{sym}{netPot.toLocaleString()}</strong>
+              <strong>{sym}{netPot.toLocaleString()}{bbTag(netPot)}</strong>
             </div>
           </div>
 
           {/* Rake not configured — inline prompt */}
-          {!rakeConfigured && (
+          {!rakeConfigured && !mtt && (
             <div className="card mb-12" style={{ borderColor: '#f4c43066' }}>
               <div className="text-muted text-sm mb-8">Commission / Rake not set for this session</div>
               <div className="pill-group mb-8">
@@ -987,11 +1008,11 @@ export default function HandRecorder() {
                   river: { actions: hand.river.actions },
                   result: hand.result,
                 };
-                const invested = heroInvested(handForNet, sb, bb);
-                const net = handNet(handForNet, { sb, bb });
+                const invested = heroInvested(handForNet, sb, bb, ante);
+                const net = handNet(handForNet, { sb, bb, ante });
                 return (
                   <div className={'text-xs mt-4 ' + (net >= 0 ? 'result-won' : 'result-lost')}>
-                    Net this hand: {net >= 0 ? '+' : '−'}{sym}{Math.abs(net).toLocaleString()}
+                    Net this hand: {net >= 0 ? '+' : '−'}{sym}{Math.abs(net).toLocaleString()}{bbTag(Math.abs(net))}
                     <span className="text-muted"> · you put in {sym}{invested.toLocaleString()}</span>
                   </div>
                 );

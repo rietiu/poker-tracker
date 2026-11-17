@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllHandsSorted, getSessionsSorted } from '../db';
-import { isRedCard, handNet, HISTORY_FILTER_POSITIONS, parseBB, parseSB, currencySymbol, formatSigned, sumByCurrency, formatGame, formatWhen } from '../utils';
+import { isRedCard, handNet, HISTORY_FILTER_POSITIONS, formatSigned, sumByCurrency, formatGame, formatWhen } from '../utils';
+import { isMtt, handBlinds, chipSym } from '../mtt';
 import PositionBadge from '../components/PositionBadge';
 
 function CardBadge({ card }) {
@@ -50,6 +51,7 @@ export default function History() {
 
   function sessionLabel(sid) {
     const s = sessions.find(s => s.id === sid);
+    if (isMtt(s)) return `${s.venue || 'Unnamed'} MTT`;
     return s ? `${s.venue || 'Unnamed'} ${formatGame(s.game, s.currency)}` : sid;
   }
 
@@ -57,10 +59,10 @@ export default function History() {
     const outcome = hand.result?.outcome;
     if (!outcome) return { text: '—', cls: 'result-fold' };
     const sess = sessions.find(x => x.id === hand.sessionId);
-    const n = handNet(hand, { sb: parseSB(sess?.game), bb: parseBB(sess?.game) });
-    if (outcome === 'folded') return { text: n < 0 ? `Fold −${currencySymbol(sess?.currency)}${Math.abs(n).toLocaleString()}` : 'Fold', cls: 'result-fold' };
+    const n = handNet(hand, handBlinds(sess, hand));
+    if (outcome === 'folded') return { text: n < 0 ? `Fold −${chipSym(sess)}${Math.abs(n).toLocaleString()}` : 'Fold', cls: 'result-fold' };
     return {
-      text: formatSigned(n, sess?.currency),
+      text: isMtt(sess) ? (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString() : formatSigned(n, sess?.currency),
       cls: n >= 0 ? 'result-won' : 'result-lost',
     };
   }
@@ -72,9 +74,9 @@ export default function History() {
   const POSITIONS = HISTORY_FILTER_POSITIONS;
 
   // One total per currency — never add pesos and dollars together.
-  const totals = sumByCurrency(filtered.map(h => {
+  const totals = sumByCurrency(filtered.filter(h => !isMtt(sessions.find(x => x.id === h.sessionId))).map(h => {
     const sess = sessions.find(x => x.id === h.sessionId);
-    return { currency: sess?.currency, amount: handNet(h, { sb: parseSB(sess?.game), bb: parseBB(sess?.game) }) };
+    return { currency: sess?.currency, amount: handNet(h, handBlinds(sess, h)) };
   }));
 
 
@@ -83,7 +85,7 @@ export default function History() {
       <div className="screen-header">
         <h1>History</h1>
       </div>
-      {filtered.length > 0 && (
+      {Object.keys(totals).length > 0 && (
         <div className="currency-totals">
           {Object.entries(totals).map(([code, v]) => (
             <span key={code} className={'currency-total ' + (v >= 0 ? 'result-won' : 'result-lost')}>

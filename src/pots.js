@@ -13,8 +13,8 @@ export function foldedPositions(hand) {
   return out;
 }
 
-// Chips each position put in over the whole hand (posted blinds included).
-export function handContributions(hand, sb = 1, bb = 2) {
+// Chips each position put in over the whole hand (posted blinds included; a BB ante is dead money on BB).
+export function handContributions(hand, sb = 1, bb = 2, ante = 0) {
   const total = {};
   for (const st of STREETS) {
     const actions = hand?.[st]?.actions || [];
@@ -24,6 +24,7 @@ export function handContributions(hand, sb = 1, bb = 2) {
     const { committed } = computeStreetState(actions, order, order, 0, isPre ? { SB: sb, BB: bb } : {});
     for (const pos of order) total[pos] = (total[pos] || 0) + (committed[pos] || 0);
   }
+  if (ante > 0) total.BB = (total.BB || 0) + ante;
   return total;
 }
 
@@ -39,8 +40,11 @@ export function endedPreflop(hand) {
 // Returns { pots: [{ amount, eligible: [pos] }], uncalled: { pos, amount } | null }.
 // Main pot first. The part of the biggest contribution nobody matched is
 // returned to that player (uncalled), not put in a pot.
-export function buildPots(contributions, folded) {
+// ante: dead money already inside contributions.BB (see handContributions); it is
+// excluded from the uncalled-bet check and added to the main pot.
+export function buildPots(contributions, folded, ante = 0) {
   const contrib = { ...contributions };
+  if (ante > 0 && contrib.BB >= ante) contrib.BB -= ante;
   const players = Object.keys(contrib);
 
   let uncalled = null;
@@ -74,6 +78,10 @@ export function buildPots(contributions, folded) {
     prev = level;
   });
 
+  if (ante > 0 && contributions.BB >= ante) {
+    if (pots.length) pots[0].amount = round2(pots[0].amount + ante);
+    else pots.push({ amount: round2(ante), eligible: live.slice().sort() });
+  }
   return { pots, uncalled };
 }
 
@@ -82,6 +90,7 @@ export function buildPots(contributions, folded) {
 // (unit 100, 'down') or 5% rounded to the nearest ₱25 (unit 25, 'nearest').
 export function computeRake(calledPot, preflopOnly, cfg) {
   const none = { rake: 0, jackpot: 0, total: 0 };
+  if (cfg?.kind === 'mtt') return none;
   if (!cfg || preflopOnly || !(calledPot > 0)) return none;
   let rake = 0;
   const r = Number(cfg.rake) || 0;
