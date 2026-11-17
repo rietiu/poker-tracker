@@ -206,7 +206,10 @@ export default function HandRecorder() {
     const clean = val.replace(/[^\d]/g, '');
     setBlindStr(p => ({ ...p, [key]: clean }));
     const n = Number(clean) || 0;
+    const nb = { sb, bb, ante, [key]: n };
     if (key === 'sb') setSb(n); else if (key === 'bb') setBb(n); else setAnte(n);
+    // Actions already entered: re-run the same revalidate + endPot routine used for action edits
+    if (STREETS.some(st => hand[st].actions.length > 0)) applyStreets(null, null, nb);
   }
 
   function patchHand(patch) {
@@ -243,6 +246,7 @@ export default function HandRecorder() {
       // Edit mode is only for completed hands — update in place
       const updated = {
         ...editRecord,
+        ...(isMtt(session) ? { blinds: blindsToSave() } : {}),
         myPosition: hand.myPosition,
         holeCards: hand.holeCards,
         preflop: {
@@ -462,16 +466,19 @@ export default function HandRecorder() {
 
   // A street's actions changed: store them, then re-check every later street
   // against who is still in (a player who now folds loses their later actions).
-  function setStreetActions(street, actions) {
+  function setStreetActions(street, actions) { applyStreets(street, actions, { sb, bb, ante }); }
+
+  // street === null: no street changed, only the blinds (re-check everything).
+  function applyStreets(street, actions, b) {
     setHand(prev => {
       const streets = Object.fromEntries(STREETS.map(st => [st, st === street ? actions : prev[st].actions]));
-      const checked = revalidateStreets(streets, prev.myPosition, { totalSeats: dealtCount, sb, bb });
+      const checked = revalidateStreets(streets, prev.myPosition, { totalSeats: dealtCount, sb: b.sb, bb: b.bb });
       const next = { ...prev };
-      let cumulative = null;
+      const changedIdx = street ? STREETS.indexOf(street) : -1;
       STREETS.forEach((st, k) => {
-        const acts = STREETS.indexOf(street) >= k ? streets[st] : (checked[st] || []);
+        const acts = changedIdx >= k ? streets[st] : (checked[st] || []);
         const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(x => [x, { actions: x === st ? acts : next[x].actions }]));
-        cumulative = Object.values(handContributions(partial, sb, bb, ante)).reduce((a, b) => a + b, 0);
+        const cumulative = Object.values(handContributions(partial, b.sb, b.bb, b.ante)).reduce((a, c) => a + c, 0);
         next[st] = { ...prev[st], actions: acts, endPot: acts.length ? cumulative : 0 };
       });
       return next;
@@ -504,7 +511,7 @@ export default function HandRecorder() {
     .some(st => (hand[st]?.actions || []).some(a => a.pos === hand.myPosition && a.action === 'fold'));
 
   function canAdvance() {
-    if (step === 0) return !!hand.myPosition && (!mtt || bb > 0);
+    if (step === 0) return !!hand.myPosition && (!mtt || isEditMode || bb > 0);
     if (step === 1) return !!(hand.holeCards[0] && hand.holeCards[1]);
     if (step === 6) return !!hand.result.outcome;
     return true;
