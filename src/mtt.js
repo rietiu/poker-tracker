@@ -52,12 +52,28 @@ export function handBlinds(session, hand) {
   return { sb: parseSB(session?.game), bb: parseBB(session?.game), ante: 0 };
 }
 
+// Prefill for a new hand: latest hand's blinds → old session levels → blank.
+export function lastHandBlinds(session, hands) {
+  const withBlinds = (hands || []).filter(h => h?.blinds);
+  const key = (h) => (h.handNum != null ? Number(h.handNum) : -Infinity);
+  let last = null;
+  for (const h of withBlinds) {
+    if (!last) { last = h; continue; }
+    const a = key(h), b = key(last);
+    if (a > b || (a === b && String(h.createdAt || '') > String(last.createdAt || ''))) last = h;
+  }
+  if (last) return { sb: last.blinds.sb, bb: last.blinds.bb, ante: last.blinds.ante };
+  const cur = currentLevel(session);
+  if (cur) return { sb: cur.sb, bb: cur.bb, ante: cur.ante };
+  return { sb: '', bb: '', ante: '' };
+}
+
 export function chipSym(session) {
   return isMtt(session) ? '' : currencySymbol(session?.currency);
 }
 
 export function levelLabel(b) {
   if (!b) return '';
-  const base = `Lv${b.level} ${Number(b.sb).toLocaleString()}/${Number(b.bb).toLocaleString()}`;
+  const base = `${b.level ? `Lv${b.level} ` : ''}${Number(b.sb).toLocaleString()}/${Number(b.bb).toLocaleString()}`;
   return Number(b.ante) > 0 ? `${base} (${Number(b.ante).toLocaleString()})` : base;
 }
