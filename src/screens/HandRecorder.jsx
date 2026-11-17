@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
 import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint, clockOf, handTimeFrom } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
-import { isMtt, handBlinds, lastHandBlinds, chipSym, bbCount, levelLabel, shouldRederive } from '../mtt';
+import { isMtt, handBlinds, lastHandBlinds, chipSym, bbCount, levelLabel, shouldRederive, stackRows, cleanStacks } from '../mtt';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
 import PositionBadge from '../components/PositionBadge';
@@ -53,6 +53,7 @@ export default function HandRecorder() {
   const [hand, setHand] = useState({
     myPosition: '',
     holeCards: [null, null],
+    stacks: {},
     preflop: { actions: [], notes: '', endPot: 0 },
     flop: { cards: [null, null, null], actions: [], notes: '', endPot: 0 },
     turn: { card: null, actions: [], notes: '', endPot: 0 },
@@ -100,6 +101,7 @@ export default function HandRecorder() {
         setHand({
           myPosition: record.myPosition || '',
           holeCards: record.holeCards || [null, null],
+          stacks: record.stacks || {},
           preflop: {
             actions: record.preflop?.actions || [],
             notes: record.preflop?.notes || '',
@@ -141,6 +143,7 @@ export default function HandRecorder() {
             setHand({
               myPosition: saved.myPosition || '',
               holeCards: saved.holeCards || [null, null],
+              stacks: saved.stacks || {},
               preflop: { actions: [], notes: '', endPot: 0, ...(saved.preflop || {}) },
               flop:    { cards: [null, null, null], actions: [], notes: '', endPot: 0, ...(saved.flop || {}) },
               turn:    { card: null, actions: [], notes: '', endPot: 0, ...(saved.turn || {}) },
@@ -258,7 +261,7 @@ export default function HandRecorder() {
       // Edit mode is only for completed hands — update in place
       const updated = {
         ...editRecord,
-        ...(isMtt(session) ? { blinds: blindsToSave() } : {}),
+        ...(isMtt(session) ? { blinds: blindsToSave(), stacks: cleanStacks(hand.stacks) } : {}),
         myPosition: hand.myPosition,
         holeCards: cur.holeCards,
         preflop: {
@@ -312,7 +315,7 @@ export default function HandRecorder() {
       buttonSeat: buttonSeat || null,
       // who sat where for this hand — the basis for per-player notes later
       seating: buttonSeat ? seatingAtHand(session?.seats, activeSeats, mySeatNum, buttonSeat) : null,
-      ...(isMtt(session) ? { blinds: blindsToSave() } : {}),
+      ...(isMtt(session) ? { blinds: blindsToSave(), stacks: cleanStacks(hand.stacks) } : {}),
       myPosition: hand.myPosition,
       holeCards: cur.holeCards,
       preflop: {
@@ -707,6 +710,37 @@ export default function HandRecorder() {
             onBack={() => setStep(1)}
             backLabel="Back to cards"
           />
+
+          {mtt && (
+            <details className="form-group" style={{ marginTop: 12 }}>
+              <summary className="form-label" style={{ cursor: 'pointer' }}>後手 Stacks（選填）</summary>
+              {stackRows(hand).map(pos => (
+                <div key={pos} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  <span style={{ width: 64 }}>{pos}{pos === hand.myPosition && <span className="text-muted text-xs"> You</span>}</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="form-input"
+                    style={{ flex: 1 }}
+                    placeholder="chips"
+                    aria-label={`${pos} stack`}
+                    value={hand.stacks?.[pos] ?? ''}
+                    onChange={e => {
+                      const v = e.target.value.replace(/\D/g, '');
+                      setHand(prev => {
+                        const st = { ...(prev.stacks || {}) };
+                        if (v === '') delete st[pos]; else st[pos] = Number(v);
+                        return { ...prev, stacks: st };
+                      });
+                    }}
+                  />
+                  <span className="text-muted text-xs" style={{ width: 70 }}>
+                    {hand.stacks?.[pos] > 0 && bb > 0 ? `${bbCount(hand.stacks[pos], bb)} BB` : ''}
+                  </span>
+                </div>
+              ))}
+            </details>
+          )}
 
           <div className="form-group">
             <label className="form-label">Notes (optional)</label>

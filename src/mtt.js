@@ -85,3 +85,31 @@ export function shouldRederive(prevBlinds, nextBlinds, hasActions) {
   const n = (b, k) => Number(b?.[k]) || 0;
   return ['sb', 'bb', 'ante'].some(k => n(prevBlinds, k) !== n(nextBlinds, k));
 }
+
+// ── Preflop stacks ("後手"): hand.stacks = { [pos]: chips } ──
+// Rows to show: hero first, then positions with a preflop action, then already-typed orphans.
+export function stackRows(hand) {
+  const rows = [];
+  const add = (p) => { if (p && !rows.includes(p)) rows.push(p); };
+  add(hand?.myPosition);
+  (hand?.preflop?.actions || []).forEach(a => add(a.pos));
+  Object.keys(hand?.stacks || {}).forEach(add);
+  return rows;
+}
+
+export function cleanStacks(stacks) {
+  const out = {};
+  Object.entries(stacks || {}).forEach(([p, v]) => {
+    const n = Number(v);
+    if (n > 0) out[p] = n;
+  });
+  return out;
+}
+
+export function formatStacks(hand, bb) {
+  const parts = Object.entries(cleanStacks(hand?.stacks)).map(([p, n]) => {
+    const c = bbCount(n, bb);
+    return `${p} ${n.toLocaleString()}${c != null ? ` (${c} BB)` : ''}`;
+  });
+  return parts.join(' · ');
+}

@@ -86,3 +86,23 @@ describe('mtt helpers', () => {
     expect(shouldRederive({ sb: '100', bb: '200', ante: '' }, { sb: 100, bb: 200, ante: 0 }, true)).toBe(false);
   });
 });
+
+import { stackRows, formatStacks, cleanStacks } from '../src/mtt.js';
+describe('preflop stacks', () => {
+  const hand = { myPosition: 'BB', preflop: { actions: [{ pos: 'UTG', action: 'raise' }, { pos: 'BTN', action: 'call' }, { pos: 'UTG', action: 'call' }, { pos: 'BB', action: 'call' }] } };
+  it('stackRows: hero first, then acting positions once, then orphan typed values', () => {
+    expect(stackRows(hand)).toEqual(['BB', 'UTG', 'BTN']);
+    expect(stackRows({ ...hand, stacks: { CO: 500 } })).toEqual(['BB', 'UTG', 'BTN', 'CO']);
+    expect(stackRows({ preflop: { actions: [] } })).toEqual([]);
+  });
+  it('cleanStacks drops empty / non-positive entries', () => {
+    expect(cleanStacks({ BTN: '7500', BB: '', CO: 0, SB: 'x' })).toEqual({ BTN: 7500 });
+    expect(cleanStacks(undefined)).toEqual({});
+  });
+  it('formatStacks', () => {
+    expect(formatStacks({ stacks: { BTN: 7500, BB: 12000 } }, 300)).toBe('BTN 7,500 (25 BB) · BB 12,000 (40 BB)');
+    expect(formatStacks({ stacks: { BTN: 7500 } }, 0)).toBe('BTN 7,500');
+    expect(formatStacks({ stacks: {} }, 200)).toBe('');
+    expect(formatStacks({}, 200)).toBe('');
+  });
+});
