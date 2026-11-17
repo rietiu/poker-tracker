@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMtt, currentLevel, totalInvested, entrySummary, bbCount, nextLevelDraft, handBlinds, chipSym, levelLabel, lastHandBlinds } from '../src/mtt.js';
+import { isMtt, currentLevel, totalInvested, entrySummary, bbCount, nextLevelDraft, handBlinds, chipSym, levelLabel, lastHandBlinds, shouldRederive } from '../src/mtt.js';
 
 const mtt = {
   kind: 'mtt', currency: 'PHP', game: '',
@@ -74,5 +74,15 @@ describe('mtt helpers', () => {
   });
   it('hand blinds fall back to {0,0,0} with nothing', () => {
     expect(handBlinds({ kind: 'mtt' }, {})).toEqual({ sb: 0, bb: 0, ante: 0 });
+  });
+  it('shouldRederive: only with actions, bb > 0 and changed numbers', () => {
+    const prev = { sb: 100, bb: 200, ante: 200 };
+    expect(shouldRederive(prev, { sb: 100, bb: 200, ante: 200 }, true)).toBe(false);
+    expect(shouldRederive(prev, { sb: 200, bb: 400, ante: 200 }, true)).toBe(true);
+    expect(shouldRederive(prev, { sb: 100, bb: 200, ante: 400 }, true)).toBe(true);
+    expect(shouldRederive(prev, { sb: 200, bb: 400, ante: 200 }, false)).toBe(false);
+    expect(shouldRederive(prev, { sb: 100, bb: 0, ante: 200 }, true)).toBe(false);
+    expect(shouldRederive(null, { sb: 1, bb: 2, ante: 0 }, true)).toBe(true);
+    expect(shouldRederive({ sb: '100', bb: '200', ante: '' }, { sb: 100, bb: 200, ante: 0 }, true)).toBe(false);
   });
 });

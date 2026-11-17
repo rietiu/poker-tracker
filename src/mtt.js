@@ -77,3 +77,11 @@ export function levelLabel(b) {
   const base = `${b.level ? `Lv${b.level} ` : ''}${Number(b.sb).toLocaleString()}/${Number(b.bb).toLocaleString()}`;
   return Number(b.ante) > 0 ? `${base} (${Number(b.ante).toLocaleString()})` : base;
 }
+
+// Re-derive pots/actions from edited blinds only at a commit point (blur / step advance / save),
+// never per keystroke: needs entered actions, a real BB, and numbers that differ from last derivation.
+export function shouldRederive(prevBlinds, nextBlinds, hasActions) {
+  if (!hasActions || !(Number(nextBlinds?.bb) > 0)) return false;
+  const n = (b, k) => Number(b?.[k]) || 0;
+  return ['sb', 'bb', 'ante'].some(k => n(prevBlinds, k) !== n(nextBlinds, k));
+}

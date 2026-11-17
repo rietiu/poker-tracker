@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getHandsBySession, put, del } from '../db';
 import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint, clockOf, handTimeFrom } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
-import { isMtt, handBlinds, lastHandBlinds, chipSym, bbCount, levelLabel } from '../mtt';
+import { isMtt, handBlinds, lastHandBlinds, chipSym, bbCount, levelLabel, shouldRederive } from '../mtt';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
 import PositionBadge from '../components/PositionBadge';
@@ -66,6 +66,7 @@ export default function HandRecorder() {
   const [ante, setAnte] = useState(0);
   const [blindStr, setBlindStr] = useState({ sb: '', bb: '', ante: '' }); // MTT: raw inputs for this hand's blinds
   const [blindsBase, setBlindsBase] = useState(null); // MTT: blinds the hand loaded with (may carry an old `level`)
+  const derivedBlindsRef = useRef({ sb: 0, bb: 0, ante: 0 }); // blinds the streets/pots were last derived with
   const [draftId, setDraftId] = useState(null);
   const [editRecord, setEditRecord] = useState(null); // original record when editing
   const [pendingRake, setPendingRake] = useState('');
@@ -175,6 +176,7 @@ export default function HandRecorder() {
           setBlindsBase(own ? { ...own } : null);
           setBlindStr({ sb: String(start.sb ?? ''), bb: String(start.bb ?? ''), ante: String(start.ante ?? '') });
           setSb(Number(start.sb) || 0); setBb(Number(start.bb) || 0); setAnte(Number(start.ante) || 0);
+          derivedBlindsRef.current = { sb: Number(start.sb) || 0, bb: Number(start.bb) || 0, ante: Number(start.ante) || 0 };
         } else { setBb(parseBB(s.game)); setSb(parseSB(s.game)); }
       }
     }
@@ -202,14 +204,22 @@ export default function HandRecorder() {
 
   const blindsToSave = () => blindsPayload(blindsBase, sb, bb, ante);
 
+  // Typing only updates the blind state; pots/actions are re-derived at commit points (commitBlinds).
   function setBlind(key, val) {
     const clean = val.replace(/[^\d]/g, '');
     setBlindStr(p => ({ ...p, [key]: clean }));
     const n = Number(clean) || 0;
-    const nb = { sb, bb, ante, [key]: n };
     if (key === 'sb') setSb(n); else if (key === 'bb') setBb(n); else setAnte(n);
-    // Actions already entered: re-run the same revalidate + endPot routine used for action edits
-    if (STREETS.some(st => hand[st].actions.length > 0)) applyStreets(null, null, nb);
+  }
+
+  // Commit point (blur / leaving step 0 / before save). Returns the hand to use (state lags a render).
+  function commitBlinds(h = hand) {
+    if (!mtt) return h;
+    const nb = { sb, bb, ante };
+    if (!shouldRederive(derivedBlindsRef.current, nb, STREETS.some(st => h[st].actions.length > 0))) return h;
+    const next = deriveHand(h, null, null, nb);
+    setHand(next);
+    return next;
   }
 
   function patchHand(patch) {
@@ -241,6 +251,8 @@ export default function HandRecorder() {
 
   async function saveHand() {
     const sid = resolvedSessionId;
+    const cur = commitBlinds();
+    if (mtt && isEditMode && Number(editRecord?.blinds?.bb) > 0 && !(bb > 0)) return; // can't clear a real BB
 
     if (isEditMode && editRecord) {
       // Edit mode is only for completed hands — update in place
@@ -248,38 +260,38 @@ export default function HandRecorder() {
         ...editRecord,
         ...(isMtt(session) ? { blinds: blindsToSave() } : {}),
         myPosition: hand.myPosition,
-        holeCards: hand.holeCards,
+        holeCards: cur.holeCards,
         preflop: {
           ...editRecord.preflop,
-          pot: hand.preflop.endPot,
-          notes: hand.preflop.notes,
-          actions: hand.preflop.actions,
-          ...deriveMyAction(hand.preflop.actions),
+          pot: cur.preflop.endPot,
+          notes: cur.preflop.notes,
+          actions: cur.preflop.actions,
+          ...deriveMyAction(cur.preflop.actions),
         },
-        flop: hand.flop.cards.some(Boolean) ? {
-          cards: hand.flop.cards,
-          pot: hand.flop.endPot,
-          notes: hand.flop.notes,
-          actions: hand.flop.actions,
-          ...deriveMyAction(hand.flop.actions),
+        flop: cur.flop.cards.some(Boolean) ? {
+          cards: cur.flop.cards,
+          pot: cur.flop.endPot,
+          notes: cur.flop.notes,
+          actions: cur.flop.actions,
+          ...deriveMyAction(cur.flop.actions),
         } : null,
-        turn: hand.turn.card ? {
-          card: hand.turn.card,
-          pot: hand.turn.endPot,
-          notes: hand.turn.notes,
-          actions: hand.turn.actions,
-          ...deriveMyAction(hand.turn.actions),
+        turn: cur.turn.card ? {
+          card: cur.turn.card,
+          pot: cur.turn.endPot,
+          notes: cur.turn.notes,
+          actions: cur.turn.actions,
+          ...deriveMyAction(cur.turn.actions),
         } : null,
-        river: hand.river.card ? {
-          card: hand.river.card,
-          pot: hand.river.endPot,
-          notes: hand.river.notes,
-          actions: hand.river.actions,
-          ...deriveMyAction(hand.river.actions),
+        river: cur.river.card ? {
+          card: cur.river.card,
+          pot: cur.river.endPot,
+          notes: cur.river.notes,
+          actions: cur.river.actions,
+          ...deriveMyAction(cur.river.actions),
         } : null,
-        result: hand.result,
-        notes: hand.result.notes || '',
-        playedAt: handTimeFrom(hand.playedTime, session?.date),
+        result: cur.result,
+        notes: cur.result.notes || '',
+        playedAt: handTimeFrom(cur.playedTime, session?.date),
         updatedAt: new Date().toISOString(),
       };
       await put('hands', updated);
@@ -302,37 +314,37 @@ export default function HandRecorder() {
       seating: buttonSeat ? seatingAtHand(session?.seats, activeSeats, mySeatNum, buttonSeat) : null,
       ...(isMtt(session) ? { blinds: blindsToSave() } : {}),
       myPosition: hand.myPosition,
-      holeCards: hand.holeCards,
+      holeCards: cur.holeCards,
       preflop: {
-        pot: hand.preflop.endPot,
-        notes: hand.preflop.notes,
-        actions: hand.preflop.actions,
-        ...deriveMyAction(hand.preflop.actions),
+        pot: cur.preflop.endPot,
+        notes: cur.preflop.notes,
+        actions: cur.preflop.actions,
+        ...deriveMyAction(cur.preflop.actions),
       },
-      flop: hand.flop.cards.some(Boolean) ? {
-        cards: hand.flop.cards,
-        pot: hand.flop.endPot,
-        notes: hand.flop.notes,
-        actions: hand.flop.actions,
-        ...deriveMyAction(hand.flop.actions),
+      flop: cur.flop.cards.some(Boolean) ? {
+        cards: cur.flop.cards,
+        pot: cur.flop.endPot,
+        notes: cur.flop.notes,
+        actions: cur.flop.actions,
+        ...deriveMyAction(cur.flop.actions),
       } : null,
-      turn: hand.turn.card ? {
-        card: hand.turn.card,
-        pot: hand.turn.endPot,
-        notes: hand.turn.notes,
-        actions: hand.turn.actions,
-        ...deriveMyAction(hand.turn.actions),
+      turn: cur.turn.card ? {
+        card: cur.turn.card,
+        pot: cur.turn.endPot,
+        notes: cur.turn.notes,
+        actions: cur.turn.actions,
+        ...deriveMyAction(cur.turn.actions),
       } : null,
-      river: hand.river.card ? {
-        card: hand.river.card,
-        pot: hand.river.endPot,
-        notes: hand.river.notes,
-        actions: hand.river.actions,
-        ...deriveMyAction(hand.river.actions),
+      river: cur.river.card ? {
+        card: cur.river.card,
+        pot: cur.river.endPot,
+        notes: cur.river.notes,
+        actions: cur.river.actions,
+        ...deriveMyAction(cur.river.actions),
       } : null,
-      result: hand.result,
-      notes: hand.result.notes || '',
-      playedAt: handTimeFrom(hand.playedTime, session?.date),
+      result: cur.result,
+      notes: cur.result.notes || '',
+      playedAt: handTimeFrom(cur.playedTime, session?.date),
       createdAt: new Date().toISOString(),
     };
 
@@ -469,20 +481,23 @@ export default function HandRecorder() {
   function setStreetActions(street, actions) { applyStreets(street, actions, { sb, bb, ante }); }
 
   // street === null: no street changed, only the blinds (re-check everything).
-  function applyStreets(street, actions, b) {
-    setHand(prev => {
-      const streets = Object.fromEntries(STREETS.map(st => [st, st === street ? actions : prev[st].actions]));
-      const checked = revalidateStreets(streets, prev.myPosition, { totalSeats: dealtCount, sb: b.sb, bb: b.bb });
-      const next = { ...prev };
-      const changedIdx = street ? STREETS.indexOf(street) : -1;
-      STREETS.forEach((st, k) => {
-        const acts = changedIdx >= k ? streets[st] : (checked[st] || []);
-        const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(x => [x, { actions: x === st ? acts : next[x].actions }]));
-        const cumulative = Object.values(handContributions(partial, b.sb, b.bb, b.ante)).reduce((a, c) => a + c, 0);
-        next[st] = { ...prev[st], actions: acts, endPot: acts.length ? cumulative : 0 };
-      });
-      return next;
+  function deriveHand(prev, street, actions, b) {
+    derivedBlindsRef.current = { sb: b.sb, bb: b.bb, ante: b.ante };
+    const streets = Object.fromEntries(STREETS.map(st => [st, st === street ? actions : prev[st].actions]));
+    const checked = revalidateStreets(streets, prev.myPosition, { totalSeats: dealtCount, sb: b.sb, bb: b.bb });
+    const next = { ...prev };
+    const changedIdx = street ? STREETS.indexOf(street) : -1;
+    STREETS.forEach((st, k) => {
+      const acts = changedIdx >= k ? streets[st] : (checked[st] || []);
+      const partial = Object.fromEntries(STREETS.slice(0, k + 1).map(x => [x, { actions: x === st ? acts : next[x].actions }]));
+      const cumulative = Object.values(handContributions(partial, b.sb, b.bb, b.ante)).reduce((a, c) => a + c, 0);
+      next[st] = { ...prev[st], actions: acts, endPot: acts.length ? cumulative : 0 };
     });
+    return next;
+  }
+
+  function applyStreets(street, actions, b) {
+    setHand(prev => deriveHand(prev, street, actions, b));
   }
 
   const boardLock = {
@@ -511,7 +526,7 @@ export default function HandRecorder() {
     .some(st => (hand[st]?.actions || []).some(a => a.pos === hand.myPosition && a.action === 'fold'));
 
   function canAdvance() {
-    if (step === 0) return !!hand.myPosition && (!mtt || isEditMode || bb > 0);
+    if (step === 0) return !!hand.myPosition && (!mtt || bb > 0 || (isEditMode && !(Number(editRecord?.blinds?.bb) > 0)));
     if (step === 1) return !!(hand.holeCards[0] && hand.holeCards[1]);
     if (step === 6) return !!hand.result.outcome;
     return true;
@@ -587,6 +602,7 @@ export default function HandRecorder() {
                       placeholder="0"
                       value={blindStr[k]}
                       onChange={e => setBlind(k, e.target.value)}
+                      onBlur={() => commitBlinds()}
                     />
                   </div>
                 ))}
@@ -1086,7 +1102,7 @@ export default function HandRecorder() {
           {step < 6 ? (
             <button
               className="btn btn-primary flex-1"
-              onClick={() => setStep(s => s + 1)}
+              onClick={() => { if (step === 0) commitBlinds(); setStep(s => s + 1); }}
               disabled={!canAdvance()}
               style={{ opacity: canAdvance() ? 1 : 0.5 }}
             >
