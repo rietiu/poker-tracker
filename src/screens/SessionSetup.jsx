@@ -76,19 +76,7 @@ export default function SessionSetup() {
   const [buyPrize, setBuyPrize] = useState('');
   const [buyFee, setBuyFee] = useState('');
   const [startingStack, setStartingStack] = useState('');
-  const [lv, setLv] = useState({ sb: '', bb: '', ante: '', bbAuto: true, anteAuto: true });
   const isMtt = kind === 'mtt';
-
-  function updateLv(patch) {
-    setLv(prev => {
-      const next = { ...prev, ...patch };
-      if ('sb' in patch && next.bbAuto) next.bb = patch.sb === '' ? '' : String(Number(patch.sb) * 2);
-      if ('bb' in patch) next.bbAuto = false;
-      if (('sb' in patch || 'bb' in patch) && next.anteAuto) next.ante = next.bb;   // BB ante usually equals the BB
-      if ('ante' in patch) next.anteAuto = false;
-      return next;
-    });
-  }
 
   useEffect(() => {
     getSessionsSorted().then(all => {
@@ -189,7 +177,7 @@ export default function SessionSetup() {
   }
 
   const canStart = isMtt
-    ? Number(buyPrize) > 0 && Number(startingStack) > 0 && Number(lv.sb) > 0 && Number(lv.bb) > 0
+    ? Number(buyPrize) > 0 && Number(startingStack) > 0
     : !!effectiveGame;
 
   async function handleStart() {
@@ -222,7 +210,6 @@ export default function SessionSetup() {
         buyIn: { prize: Number(buyPrize) || 0, fee: Number(buyFee) || 0 },
         startingStack: Number(startingStack) || 0,
         entries: [{ type: 'buyin', amount: (Number(buyPrize) || 0) + (Number(buyFee) || 0), chips: Number(startingStack) || 0, at: sessionStartFrom(startTime) }],
-        levels: [{ level: 1, sb: Number(lv.sb), bb: Number(lv.bb), ante: Number(lv.ante) || 0, at: sessionStartFrom(startTime) }],
         myStack: Number(startingStack) || 0,
         rake: null, rakeMax: 0, jackpot: 0,
       } : {
@@ -330,14 +317,6 @@ export default function SessionSetup() {
       <div className="form-group">
         <label className="form-label">Starting stack（籌碼）</label>
         <input className="form-input" inputMode="numeric" value={startingStack} onChange={e => setStartingStack(e.target.value)} />
-      </div>
-      <div className="form-group">
-        <label className="form-label">Level 1 盲注</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input className="form-input" inputMode="numeric" placeholder="SB" value={lv.sb} onChange={e => updateLv({ sb: e.target.value })} />
-          <input className="form-input" inputMode="numeric" placeholder="BB" value={lv.bb} onChange={e => updateLv({ bb: e.target.value })} />
-          <input className="form-input" inputMode="numeric" placeholder="BB ante" value={lv.ante} onChange={e => updateLv({ ante: e.target.value })} />
-        </div>
       </div>
       </>)}
 

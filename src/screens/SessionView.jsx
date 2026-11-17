@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, getAll, put, del, getHandsBySession } from '../db';
 import { isRedCard, TAG_META, matchPlayers, toggleLook, describeLooks, uuid, randomPlayerName, handNet, currencySymbol, formatSigned, formatGame, applySeatEvent, ensureSeatCodes, describeSeatEvent, clockOf } from '../utils';
-import { isMtt, currentLevel, totalInvested, entrySummary, bbCount, nextLevelDraft, chipSym, handBlinds, ENTRY_TYPES, levelLabel } from '../mtt';
+import { isMtt, totalInvested, entrySummary, bbCount, chipSym, handBlinds, ENTRY_TYPES, levelLabel, lastHandBlinds } from '../mtt';
 import PositionBadge from '../components/PositionBadge';
 import { TagSelector, LookSelector } from '../components/PlayerTag';
 
@@ -194,11 +194,11 @@ function SeatEditSheet({ seatNum, seat, isMySeat, session, sym, players = [], on
   );
 }
 
-function SeatGrid({ session, onSeatTap }) {
+function SeatGrid({ session, hands, onSeatTap }) {
   const { seats = [], mySeat, totalSeats } = session;
   const sym = chipSym(session);
   const mtt = isMtt(session);
-  const bb = currentLevel(session)?.bb;
+  const bb = mtt ? lastHandBlinds(session, hands).bb : null;
   return (
     <div className="session-seat-grid">
       {Array.from({ length: totalSeats }, (_, i) => i + 1).map(n => {
@@ -246,7 +246,7 @@ export default function SessionView() {
   const [hands, setHands] = useState([]);
   const [editingSeat, setEditingSeat] = useState(null); // seatNum or null
   const [players, setPlayers] = useState([]); // saved player profiles
-  const [panel, setPanel] = useState(null); // MTT: 'level' | 'entry' | null
+  const [panel, setPanel] = useState(null); // MTT: 'entry' | null
   const [draft, setDraft] = useState({});
 
   useEffect(() => { getAll('players').then(setPlayers); }, []);
@@ -304,28 +304,14 @@ export default function SessionView() {
   const completedHands = hands.filter(h => !h.incomplete);
 
   const mtt = isMtt(session);
+  const lastBlinds = mtt && hands.some(h => h.blinds) ? lastHandBlinds(session, hands) : null;
   const netOf = (hand) => handNet(hand, handBlinds(session, hand));
   const netResult = completedHands.reduce((s, h) => s + netOf(h), 0);
-
-  function openLevelPanel() {
-    const d = nextLevelDraft(session);
-    setDraft({ sb: String(d.sb || ''), bb: String(d.bb || ''), ante: String(d.ante || '') });
-    setPanel('level');
-  }
 
   function openEntryPanel() {
     const bi = session.buyIn || {};
     setDraft({ type: 'reentry', amount: String((Number(bi.prize) || 0) + (Number(bi.fee) || 0) || ''), chips: String(session.startingStack || '') });
     setPanel('entry');
-  }
-
-  async function confirmLevel() {
-    const d = draft;
-    const cur = currentLevel(session);
-    await saveSession({ ...session, levels: [...(session.levels || []), {
-      level: (cur?.level || 0) + 1, sb: Number(d.sb), bb: Number(d.bb), ante: Number(d.ante) || 0, at: new Date().toISOString(),
-    }] });
-    setPanel(null);
   }
 
   async function confirmEntry() {
@@ -358,7 +344,7 @@ export default function SessionView() {
         <div style={{ flex: 1 }}>
           <h1>{session.venue || 'Unnamed venue'}</h1>
           {mtt
-            ? <div className="text-muted text-sm">MTT · {levelLabel(currentLevel(session))} · {session.totalSeats}-handed · started {clockOf(session.date)}</div>
+            ? <div className="text-muted text-sm">MTT · {lastBlinds ? `最近一手 ${levelLabel(lastBlinds)}` : '盲注喺每手牌記'} · {session.totalSeats}-handed · started {clockOf(session.date)}</div>
             : <div className="text-muted text-sm">{formatGame(session.game, session.currency)} · {session.totalSeats}-handed · started {clockOf(session.date)}</div>}
         </div>
         {mtt ? (
@@ -376,7 +362,6 @@ export default function SessionView() {
 
       {mtt && (
         <div className="row gap-8 mb-8">
-          <button className="btn btn-secondary btn-sm" onClick={openLevelPanel}>⬆ 升盲</button>
           <button className="btn btn-secondary btn-sm" onClick={openEntryPanel}>＋ Re-entry / Rebuy / Add-on</button>
         </div>
       )}
@@ -407,7 +392,7 @@ export default function SessionView() {
 
       {/* Live table — tap any seat to edit */}
       <div className="section-label">Table</div>
-      <SeatGrid session={session} onSeatTap={setEditingSeat} />
+      <SeatGrid session={session} hands={hands} onSeatTap={setEditingSeat} />
       {(session.seatLog || []).length > 0 && (
         <details className="seat-log">
           <summary>Table log ({session.seatLog.length})</summary>
@@ -475,25 +460,6 @@ export default function SessionView() {
           </button>
         </div>
       </div>
-
-      {mtt && panel === 'level' && (
-        <div className="sheet-overlay" onClick={() => setPanel(null)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}>
-            <div className="sheet-header">
-              <h2>⬆ 升盲</h2>
-              <button className="back-btn" style={{ minHeight: 'auto', paddingRight: 0 }} onClick={() => setPanel(null)}>✕</button>
-            </div>
-            <div className="text-muted text-xs mb-8">新級別 Lv{(currentLevel(session)?.level || 0) + 1}</div>
-            {[['sb', 'SB'], ['bb', 'BB'], ['ante', 'BB ante']].map(([k, label]) => (
-              <div className="form-group" key={k}>
-                <label className="form-label">{label}</label>
-                <input type="number" className="form-input" placeholder="0" value={draft[k] ?? ''} onChange={e => setDraft({ ...draft, [k]: e.target.value })} inputMode="numeric" />
-              </div>
-            ))}
-            <button className="btn btn-primary btn-full mb-8" disabled={!(Number(draft.sb) > 0 && Number(draft.bb) > 0)} onClick={confirmLevel}>確認升盲</button>
-          </div>
-        </div>
-      )}
 
       {mtt && panel === 'entry' && (
         <div className="sheet-overlay" onClick={() => setPanel(null)}>

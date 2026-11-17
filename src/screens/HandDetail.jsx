@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, del } from '../db';
 import { formatCard, formatMoney, isRedCard, handNet, heroInvested, formatGame, formatWhen } from '../utils';
-import { isMtt, handBlinds, chipSym, currentLevel, levelLabel } from '../mtt';
+import { isMtt, handBlinds, chipSym, currentLevel, levelLabel, formatStacks } from '../mtt';
 import PositionBadge from '../components/PositionBadge';
 
 
@@ -322,6 +322,9 @@ export default function HandDetail() {
       )}
 
       <StreetRow label="Pre-flop" street={{ ...hand.preflop, notes: hand.preflop?.notes }} sym={sym} />
+      {isMtt(session) && formatStacks(hand, blinds.bb) && (
+        <div className="text-muted text-xs mb-8">後手：{formatStacks(hand, blinds.bb)}</div>
+      )}
       {hand.flop && <StreetRow label="Flop" street={hand.flop} cards={hand.flop.cards} sym={sym} />}
       {hand.turn && <StreetRow label="Turn" street={hand.turn} cards={[hand.turn.card]} sym={sym} />}
       {hand.river && <StreetRow label="River" street={hand.river} cards={[hand.river.card]} sym={sym} />}
