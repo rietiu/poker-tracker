@@ -96,27 +96,47 @@ export function describeHand(cards) {
   return evaluate7(cards).name
 }
 
+const isCard = (x) => typeof x === 'string' && x.length === 2 && !!RANK_VALUE[x[0]] && 'shdc'.includes(x[1])
+
+/** Keep only positions holding exactly two cards (opponent hole cards to persist). */
+export function cleanOpponentCards(opp) {
+  const out = {}
+  for (const [pos, cards] of Object.entries(opp || {})) {
+    if (Array.isArray(cards) && cards.length === 2 && cards.every(Boolean)) out[pos] = [...cards]
+  }
+  return out
+}
+
 /**
  * Suggest winners per pot. Needs a full 5-card board and both hole cards of
  * every eligible player in that pot; otherwise that pot's entry is null.
+ * Never throws: duplicate or malformed cards make every pot null.
  */
-export function suggestPotWinners({ board, holes, pots }) {
-  const boardFull = Array.isArray(board) && board.length === 5
-  return pots.map((pot) => {
-    if (!boardFull) return null
-    const eligible = pot.eligible || []
-    if (eligible.length === 0) return null
-    const known = eligible.every((pos) => Array.isArray(holes?.[pos]) && holes[pos].length === 2 && holes[pos].every(Boolean))
-    if (!known) return null
+export function suggestPotWinners({ board, holes, pots } = {}) {
+  if (!Array.isArray(pots)) return []
+  const none = pots.map(() => null)
+  try {
+    const boardFull = Array.isArray(board) && board.length === 5
+    if (!boardFull || !board.every(isCard)) return none
+    return pots.map((pot) => {
+      const eligible = pot?.eligible || []
+      if (eligible.length === 0) return null
+      const known = eligible.every((pos) => Array.isArray(holes?.[pos]) && holes[pos].length === 2 && holes[pos].every(Boolean))
+      if (!known) return null
+      const used = [...board, ...eligible.flatMap((pos) => holes[pos])]
+      if (!used.every(isCard) || new Set(used).size !== used.length) return null
 
-    let best = null
-    let winners = []
-    for (const pos of eligible) {
-      const result = evaluate7([...board, ...holes[pos]])
-      const cmp = best ? compareScores(result.score, best.score) : 1
-      if (cmp > 0) { best = result; winners = [pos] }
-      else if (cmp === 0) winners.push(pos)
-    }
-    return { winners, name: best.name }
-  })
+      let best = null
+      let winners = []
+      for (const pos of eligible) {
+        const result = evaluate7([...board, ...holes[pos]])
+        const cmp = best ? compareScores(result.score, best.score) : 1
+        if (cmp > 0) { best = result; winners = [pos] }
+        else if (cmp === 0) winners.push(pos)
+      }
+      return { winners, name: best.name }
+    })
+  } catch {
+    return none
+  }
 }

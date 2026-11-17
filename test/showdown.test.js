@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { evaluate7, compareScores, suggestPotWinners, describeHand } from '../src/showdown.js'
+import { evaluate7, compareScores, suggestPotWinners, describeHand, cleanOpponentCards } from '../src/showdown.js'
 
 const c = (s) => s.split(' ')
 
@@ -174,5 +174,37 @@ describe('suggestPotWinners', () => {
   })
   it('returns null for an empty eligible list', () => {
     expect(suggestPotWinners({ board, holes: {}, pots: [{ eligible: [] }] })).toEqual([null])
+  })
+})
+
+describe('suggestPotWinners hardening', () => {
+  const board = c('As Kd 7c 7h 2s')
+  const pots = [{ eligible: ['BTN', 'BB'] }]
+  it('returns null on a card duplicated across hole and board', () => {
+    expect(suggestPotWinners({ board, holes: { BTN: c('As Qd'), BB: c('Jc Jd') }, pots })).toEqual([null])
+  })
+  it('returns null on duplicate hole cards between players', () => {
+    expect(suggestPotWinners({ board, holes: { BTN: c('Qs Qd'), BB: c('Qd Jd') }, pots })).toEqual([null])
+  })
+  it('returns null on a duplicate within the board or within one hand', () => {
+    expect(suggestPotWinners({ board: c('As Kd 7c 7h As'), holes: { BTN: c('Qs Qd'), BB: c('Jc Jd') }, pots })).toEqual([null])
+    expect(suggestPotWinners({ board, holes: { BTN: c('Qs Qs'), BB: c('Jc Jd') }, pots })).toEqual([null])
+  })
+  it('never throws on malformed or non-string cards', () => {
+    for (const bad of [['Zz', 'Qd'], [null, 'Qd'], [12, 'Qd'], ['', 'Qd'], ['Q', 'Qd'], [{}, 'Qd']]) {
+      expect(() => suggestPotWinners({ board, holes: { BTN: bad, BB: c('Jc Jd') }, pots })).not.toThrow()
+      expect(suggestPotWinners({ board, holes: { BTN: bad, BB: c('Jc Jd') }, pots })).toEqual([null])
+    }
+    expect(suggestPotWinners({ board: [1, 2, 3, 4, 5], holes: { BTN: c('Qs Qd'), BB: c('Jc Jd') }, pots })).toEqual([null])
+    expect(suggestPotWinners({ board, holes: { BTN: c('Qs Qd'), BB: c('Jc Jd') }, pots: null })).toEqual([])
+  })
+})
+
+describe('cleanOpponentCards', () => {
+  it('keeps only positions with exactly two cards', () => {
+    expect(cleanOpponentCards({ BTN: c('As Kd'), BB: ['Qs', null], SB: [null, null], CO: ['Qs'] })).toEqual({ BTN: c('As Kd') })
+  })
+  it('handles missing input', () => {
+    expect(cleanOpponentCards(undefined)).toEqual({})
   })
 })
