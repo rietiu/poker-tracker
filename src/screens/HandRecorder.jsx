@@ -268,7 +268,7 @@ export default function HandRecorder() {
         ...(isMtt(session) ? { blinds: blindsToSave(), stacks: cleanStacks(hand.stacks) } : {}),
         myPosition: hand.myPosition,
         holeCards: cur.holeCards,
-        opponentCards: cleanOpponentCards(cur.opponentCards),
+        opponentCards: cleanOpponentCards(cur.opponentCards, finalRemaining),
         preflop: {
           ...editRecord.preflop,
           pot: cur.preflop.endPot,
@@ -324,7 +324,7 @@ export default function HandRecorder() {
       ...(isMtt(session) ? { blinds: blindsToSave(), stacks: cleanStacks(hand.stacks) } : {}),
       myPosition: hand.myPosition,
       holeCards: cur.holeCards,
-      ...(Object.keys(cleanOpponentCards(cur.opponentCards)).length ? { opponentCards: cleanOpponentCards(cur.opponentCards) } : {}),
+      ...(Object.keys(cleanOpponentCards(cur.opponentCards, finalRemaining)).length ? { opponentCards: cleanOpponentCards(cur.opponentCards, finalRemaining) } : {}),
       preflop: {
         pot: cur.preflop.endPot,
         notes: cur.preflop.notes,
@@ -397,7 +397,8 @@ export default function HandRecorder() {
   const sym = chipSym(session);
   const mtt = isMtt(session);
   const bbTag = (x) => (mtt && bbCount(x, bb) != null ? ` (${bbCount(x, bb)} BB)` : '');
-  const usedCards = allCards(hand);
+  const baseUsedCards = allCards(hand);
+  const usedCards = [...baseUsedCards, ...Object.values(hand.opponentCards || {}).flat().filter(Boolean)];
   const progress = ((step + 1) / TOTAL) * 100;
   const showStickyBar = step >= 2;
 
@@ -581,6 +582,9 @@ export default function HandRecorder() {
       })
     : [];
   const hasSuggestion = potSuggestions.some(Boolean);
+  // Everyone in is known and the board is full, yet no suggestion: a card appears twice.
+  const duplicateHint = showdownOn && boardComplete && !hasSuggestion && heroHole
+    && showdownOpps.every(p => { const c = cleanOpponentCards(hand.opponentCards)[p]; return !!c; });
   const posName = (pos) => (pos === hand.myPosition ? 'Me' : pos);
   const suggestionText = (sg) => {
     if (sg.winners.length === 1) return `${posName(sg.winners[0])} 贏（${sg.name}）`;
@@ -1079,12 +1083,13 @@ export default function HandRecorder() {
                         key={pos + ':' + (cards.some(Boolean) ? 'set' : 'empty')}
                         cards={cards}
                         onChange={cs => setHand(prev => ({ ...prev, opponentCards: { ...(prev.opponentCards || {}), [pos]: cs } }))}
-                        usedCards={[...usedCards, ...otherOpp]}
+                        usedCards={[...baseUsedCards, ...otherOpp]}
                       />
                     </div>
                   );
                 })}
               </details>
+              {duplicateHint && <div className="text-muted text-xs mt-8">牌有重複，未能計邊個贏</div>}
               {hasSuggestion && (!multiPot || heroFolded) && (() => {
                 const sg = potSuggestions[0];
                 if (!sg) return null;

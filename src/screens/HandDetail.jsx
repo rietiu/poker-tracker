@@ -4,6 +4,7 @@ import { get, del } from '../db';
 import { formatCard, formatMoney, isRedCard, handNet, heroInvested, formatGame, formatWhen } from '../utils';
 import { isMtt, handBlinds, chipSym, currentLevel, levelLabel, formatStacks } from '../mtt';
 import PositionBadge from '../components/PositionBadge';
+import { cleanOpponentCards, showdownHandNames } from '../showdown';
 
 
 // ── Position labels ──────────────────────────────────────────────────────────
@@ -268,6 +269,16 @@ export default function HandDetail() {
   const invested = heroInvested(hand, blinds.sb, blinds.bb, blinds.ante);
   const levelText = isMtt(session) ? levelLabel(hand.blinds || currentLevel(session)) : '';
 
+  const oppEntries = Object.entries(cleanOpponentCards(hand.opponentCards));
+  const handNames = oppEntries.length
+    ? (showdownHandNames({
+        board: [...(hand.flop?.cards || []), hand.turn?.card, hand.river?.card].filter(Boolean),
+        heroHole: hand.holeCards,
+        myPosition: hand.myPosition,
+        opponentCards: hand.opponentCards,
+      }) || []).filter(h => !(outcome === 'folded' && h.pos === hand.myPosition))
+    : [];
+
   async function handleDelete() {
     await del('hands', id);
     navigate(-1);
@@ -306,6 +317,22 @@ export default function HandDetail() {
           </div>
         )}
         {hand.result?.notes && <div className="text-muted text-sm mt-8">{hand.result.notes}</div>}
+        {oppEntries.length > 0 && (
+          <div className="text-sm mt-8">
+            <span className="text-muted">對手：</span>
+            {oppEntries.map(([pos, cs], i) => (
+              <span key={pos}>
+                {i > 0 && <span className="text-muted"> · </span>}
+                {pos} {cs.map((c, j) => <CardBadge key={j} card={c} />)}
+              </span>
+            ))}
+          </div>
+        )}
+        {handNames.length > 0 && (
+          <div className="text-sm mt-8 text-muted">
+            {handNames.map(h => `${h.pos === hand.myPosition ? 'Me' : h.pos}: ${h.name}`).join(' · ')}
+          </div>
+        )}
       </div>
 
       {hand.seating?.length > 0 && (

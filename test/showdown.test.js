@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { evaluate7, compareScores, suggestPotWinners, describeHand, cleanOpponentCards } from '../src/showdown.js'
+import { evaluate7, compareScores, suggestPotWinners, describeHand, cleanOpponentCards, showdownHandNames } from '../src/showdown.js'
 
 const c = (s) => s.split(' ')
 
@@ -206,5 +206,22 @@ describe('cleanOpponentCards', () => {
   })
   it('handles missing input', () => {
     expect(cleanOpponentCards(undefined)).toEqual({})
+  })
+})
+
+describe('showdownHandNames', () => {
+  const board = c('2h 7h Jh 9c Kd')
+  it('names every hand when board and all cards are known', () => {
+    const r = showdownHandNames({ board, heroHole: c('Ah 3h'), myPosition: 'BB', opponentCards: { BTN: c('Ks Kc') } })
+    expect(r.map(x => x.pos)).toEqual(['BTN', 'BB'])
+    expect(r[0].name).toMatch(/trips/i)
+    expect(r[1].name).toMatch(/flush/i)
+  })
+  it('returns null when the board is incomplete, a card is missing or duplicated', () => {
+    const opp = { BTN: c('Ks Kc') }
+    expect(showdownHandNames({ board: board.slice(0, 4), heroHole: c('Ah 3h'), myPosition: 'BB', opponentCards: opp })).toBeNull()
+    expect(showdownHandNames({ board, heroHole: c('Ah 3h'), myPosition: 'BB', opponentCards: { BTN: ['Ks', null] } })).toBeNull()
+    expect(showdownHandNames({ board, heroHole: c('Ks 3h'), myPosition: 'BB', opponentCards: opp })).toBeNull()
+    expect(showdownHandNames()).toBeNull()
   })
 })

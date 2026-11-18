@@ -99,9 +99,10 @@ export function describeHand(cards) {
 const isCard = (x) => typeof x === 'string' && x.length === 2 && !!RANK_VALUE[x[0]] && 'shdc'.includes(x[1])
 
 /** Keep only positions holding exactly two cards (opponent hole cards to persist). */
-export function cleanOpponentCards(opp) {
+export function cleanOpponentCards(opp, keepPositions) {
   const out = {}
   for (const [pos, cards] of Object.entries(opp || {})) {
+    if (Array.isArray(keepPositions) && !keepPositions.includes(pos)) continue
     if (Array.isArray(cards) && cards.length === 2 && cards.every(Boolean)) out[pos] = [...cards]
   }
   return out
@@ -138,5 +139,28 @@ export function suggestPotWinners({ board, holes, pots } = {}) {
     })
   } catch {
     return none
+  }
+}
+
+/**
+ * Hand names for the detail screen. Needs a full 5-card board, the hero's two
+ * cards and every listed opponent's two cards; otherwise returns null.
+ * Returns [{ pos, name }] with opponents first, then the hero (pos = myPosition).
+ */
+export function showdownHandNames({ board, heroHole, myPosition, opponentCards } = {}) {
+  try {
+    const opp = cleanOpponentCards(opponentCards)
+    const listed = Object.keys(opponentCards || {})
+    if (!listed.length || listed.some((p) => !opp[p])) return null
+    if (!Array.isArray(board) || board.length !== 5 || !board.every(isCard)) return null
+    if (!Array.isArray(heroHole) || heroHole.length !== 2 || !heroHole.every(isCard)) return null
+    const all = [...board, ...heroHole, ...Object.values(opp).flat()]
+    if (!all.every(isCard) || new Set(all).size !== all.length) return null
+    return [
+      ...Object.entries(opp).map(([pos, cs]) => ({ pos, name: describeHand([...cs, ...board]) })),
+      { pos: myPosition, name: describeHand([...heroHole, ...board]) },
+    ]
+  } catch {
+    return null
   }
 }
