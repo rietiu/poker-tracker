@@ -4,6 +4,7 @@ import { get, getHandsBySession, put, del } from '../db';
 import { uuid, parseBB, parseSB, TABLE_POSITIONS, formatCard, isRedCard, handNet, heroInvested, nextHandNum, relocateHero, revalidateStreets, positionAmong, buttonSeatAmong, activeSeatNums, seatingAtHand, SEAT_OUT, cbetHint, clockOf, handTimeFrom } from '../utils';
 import { handContributions, buildPots, computeRake, heroTake, endedPreflop, foldedPositions } from '../pots';
 import { isMtt, handBlinds, lastHandBlinds, chipSym, bbCount, levelLabel, shouldRederive, stackRows, cleanStacks } from '../mtt';
+import { suggestPotWinners, describeHand, cleanOpponentCards } from '../showdown';
 import InlineCardPicker from '../components/InlineCardPicker';
 import PositionSequencer from '../components/PositionSequencer';
 import PositionBadge from '../components/PositionBadge';
@@ -54,6 +55,7 @@ export default function HandRecorder() {
     myPosition: '',
     holeCards: [null, null],
     stacks: {},
+    opponentCards: {},
     preflop: { actions: [], notes: '', endPot: 0 },
     flop: { cards: [null, null, null], actions: [], notes: '', endPot: 0 },
     turn: { card: null, actions: [], notes: '', endPot: 0 },
@@ -102,6 +104,7 @@ export default function HandRecorder() {
           myPosition: record.myPosition || '',
           holeCards: record.holeCards || [null, null],
           stacks: record.stacks || {},
+          opponentCards: record.opponentCards || {},
           preflop: {
             actions: record.preflop?.actions || [],
             notes: record.preflop?.notes || '',
@@ -144,6 +147,7 @@ export default function HandRecorder() {
               myPosition: saved.myPosition || '',
               holeCards: saved.holeCards || [null, null],
               stacks: saved.stacks || {},
+              opponentCards: saved.opponentCards || {},
               preflop: { actions: [], notes: '', endPot: 0, ...(saved.preflop || {}) },
               flop:    { cards: [null, null, null], actions: [], notes: '', endPot: 0, ...(saved.flop || {}) },
               turn:    { card: null, actions: [], notes: '', endPot: 0, ...(saved.turn || {}) },
@@ -264,6 +268,7 @@ export default function HandRecorder() {
         ...(isMtt(session) ? { blinds: blindsToSave(), stacks: cleanStacks(hand.stacks) } : {}),
         myPosition: hand.myPosition,
         holeCards: cur.holeCards,
+        opponentCards: cleanOpponentCards(cur.opponentCards, finalRemaining),
         preflop: {
           ...editRecord.preflop,
           pot: cur.preflop.endPot,
@@ -297,6 +302,7 @@ export default function HandRecorder() {
         playedAt: handTimeFrom(cur.playedTime, session?.date),
         updatedAt: new Date().toISOString(),
       };
+      if (!Object.keys(updated.opponentCards).length) delete updated.opponentCards;
       await put('hands', updated);
       navigate(`/hand/${handId}`);
       return;
@@ -318,6 +324,7 @@ export default function HandRecorder() {
       ...(isMtt(session) ? { blinds: blindsToSave(), stacks: cleanStacks(hand.stacks) } : {}),
       myPosition: hand.myPosition,
       holeCards: cur.holeCards,
+      ...(Object.keys(cleanOpponentCards(cur.opponentCards, finalRemaining)).length ? { opponentCards: cleanOpponentCards(cur.opponentCards, finalRemaining) } : {}),
       preflop: {
         pot: cur.preflop.endPot,
         notes: cur.preflop.notes,
@@ -390,7 +397,8 @@ export default function HandRecorder() {
   const sym = chipSym(session);
   const mtt = isMtt(session);
   const bbTag = (x) => (mtt && bbCount(x, bb) != null ? ` (${bbCount(x, bb)} BB)` : '');
-  const usedCards = allCards(hand);
+  const baseUsedCards = allCards(hand);
+  const usedCards = [...baseUsedCards, ...Object.values(hand.opponentCards || {}).flat().filter(Boolean)];
   const progress = ((step + 1) / TOTAL) * 100;
   const showStickyBar = step >= 2;
 
@@ -432,9 +440,10 @@ export default function HandRecorder() {
     return res.outcome === 'won' ? wonTake : null;
   })();
 
-  function togglePotWinner(i, pos) {
+  // Write winners for the given pots ({ [potIndex]: [positions] }) — same result shape as togglePotWinner.
+  function setPotWinners(changes) {
     const current = hand.result.potWinners || pots.map(() => []);
-    const next = current.map((w, j) => (j !== i ? w : w.includes(pos) ? w.filter(x => x !== pos) : [...w, pos]));
+    const next = current.map((w, j) => (changes[j] ? changes[j] : w));
     const take = heroTake(pots.map((p, j) => ({ ...p, winners: next[j] || [] })), hand.myPosition, rakeInfo.total, uncalled);
     patchHand({ result: {
       ...hand.result,
@@ -444,6 +453,31 @@ export default function HandRecorder() {
       winner: '',
       amount: String(take),
     } });
+  }
+
+  function togglePotWinner(i, pos) {
+    const current = hand.result.potWinners || pots.map(() => []);
+    const w = current[i] || [];
+    setPotWinners({ [i]: w.includes(pos) ? w.filter(x => x !== pos) : [...w, pos] });
+  }
+
+  // Single pot: the same writes as tapping the winner button / Split.
+  function pickSingleWinner(pos) {
+    if (heroFolded) {
+      patchHand({ result: { ...hand.result, outcome: 'folded', winner: pos, amount: '' } });
+      return;
+    }
+    const iWon = pos === hand.myPosition;
+    patchHand({ result: {
+      ...hand.result,
+      outcome: iWon ? 'won' : 'lost',
+      winner: pos,
+      amount: iWon ? String(wonTake) : hand.result.amount || '',
+    }});
+  }
+  function pickSplit(winners) {
+    const share = heroTake(pots.map(p => ({ ...p, winners })), hand.myPosition, rakeInfo.total, uncalled);
+    patchHand({ result: { ...hand.result, outcome: 'split', winner: '', amount: String(share) } });
   }
 
   // #6: hero picked a different seat after recording — move hero's actions with them.
@@ -527,6 +561,42 @@ export default function HandRecorder() {
 
   const heroFolded = ['preflop', 'flop', 'turn', 'river']
     .some(st => (hand[st]?.actions || []).some(a => a.pos === hand.myPosition && a.action === 'fold'));
+
+  // ── Showdown: opponents' hole cards -> suggested winner (suggestion only) ────
+  const showdownOn = step === 6 && finalRemaining.length >= 2;
+  const showdownOpps = finalRemaining.filter(p => p !== hand.myPosition);
+  const boardCards = [...(hand.flop?.cards || []), hand.turn?.card, hand.river?.card];
+  const boardComplete = boardCards.length === 5 && boardCards.every(Boolean);
+  const heroHole = hand.holeCards.every(Boolean) ? hand.holeCards : null;
+  const myHandName = (() => {
+    if (!showdownOn || heroFolded || !heroHole) return '';
+    const b = boardCards.filter(Boolean);
+    if (b.length < 3) return '';
+    try { return describeHand([...heroHole, ...b]); } catch { return ''; }
+  })();
+  const potSuggestions = showdownOn && boardComplete
+    ? suggestPotWinners({
+        board: boardCards,
+        holes: { ...cleanOpponentCards(hand.opponentCards), ...(heroHole ? { [hand.myPosition]: heroHole } : {}) },
+        pots,
+      })
+    : [];
+  const hasSuggestion = potSuggestions.some(Boolean);
+  // Everyone in is known and the board is full, yet no suggestion: a card appears twice.
+  const duplicateHint = showdownOn && boardComplete && !hasSuggestion && heroHole
+    && showdownOpps.every(p => { const c = cleanOpponentCards(hand.opponentCards)[p]; return !!c; });
+  const posName = (pos) => (pos === hand.myPosition ? 'Me' : pos);
+  const suggestionText = (sg) => {
+    if (sg.winners.length === 1) return `${posName(sg.winners[0])} 贏（${sg.name}）`;
+    return `${sg.winners.map(posName).join(' 同 ')} 平手（${sg.name}）`;
+  };
+  // Single pot apply: unique winner, or a tie that includes me. Otherwise (folded tie /
+  // opponents-only tie) there is no equivalent button, so it stays text only.
+  const singleApplicable = (sg) => !!sg && (sg.winners.length === 1 || (!heroFolded && sg.winners.includes(hand.myPosition)));
+  function applySuggestionSingle(sg) {
+    if (sg.winners.length === 1) pickSingleWinner(sg.winners[0]);
+    else pickSplit(sg.winners);
+  }
 
   function canAdvance() {
     if (step === 0) return !!hand.myPosition && (!mtt || bb > 0 || (isEditMode && !(Number(editRecord?.blinds?.bb) > 0)));
@@ -983,6 +1053,79 @@ export default function HandRecorder() {
             </div>
           )}
 
+          {/* Showdown: optional opponent hole cards + suggested winner */}
+          {showdownOn && (
+            <div className="form-group">
+              {myHandName && <div className="text-muted text-xs mb-8">你嘅牌：{myHandName}</div>}
+              <details>
+                <summary className="text-muted text-sm">對手手牌（選填）</summary>
+                {showdownOpps.map(pos => {
+                  const cards = hand.opponentCards?.[pos] || [null, null];
+                  const otherOpp = showdownOpps.filter(x => x !== pos).flatMap(x => hand.opponentCards?.[x] || []).filter(Boolean);
+                  return (
+                    <div key={pos} className="mt-8">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="text-sm">{pos}</span>
+                        {cards.some(Boolean) && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setHand(prev => {
+                              const o = { ...(prev.opponentCards || {}) };
+                              delete o[pos];
+                              return { ...prev, opponentCards: o };
+                            })}
+                          >
+                            清除
+                          </button>
+                        )}
+                      </div>
+                      <InlineCardPicker
+                        key={pos + ':' + (cards.some(Boolean) ? 'set' : 'empty')}
+                        cards={cards}
+                        onChange={cs => setHand(prev => ({ ...prev, opponentCards: { ...(prev.opponentCards || {}), [pos]: cs } }))}
+                        usedCards={[...baseUsedCards, ...otherOpp]}
+                      />
+                    </div>
+                  );
+                })}
+              </details>
+              {duplicateHint && <div className="text-muted text-xs mt-8">牌有重複，未能計邊個贏</div>}
+              {hasSuggestion && (!multiPot || heroFolded) && (() => {
+                const sg = potSuggestions[0];
+                if (!sg) return null;
+                return (
+                  <div className="recalc-hint text-xs mt-8">
+                    <span>按手牌計：{suggestionText(sg)}</span>
+                    {singleApplicable(sg) && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => applySuggestionSingle(sg)}>用呢個結果</button>
+                    )}
+                  </div>
+                );
+              })()}
+              {hasSuggestion && multiPot && !heroFolded && (
+                <div className="mt-8">
+                  {pots.map((p, i) => (
+                    <div key={i} className="recalc-hint text-xs mb-8">
+                      <span>{potLabel(i)}：{potSuggestions[i] ? `按手牌計：${suggestionText(potSuggestions[i])}` : '手牌未知，唔出建議'}</span>
+                      {potSuggestions[i] && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => setPotWinners({ [i]: potSuggestions[i].winners })}>用呢個結果</button>
+                      )}
+                    </div>
+                  ))}
+                  {potSuggestions.every(Boolean) && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setPotWinners(Object.fromEntries(potSuggestions.map((sg, i) => [i, sg.winners])))}
+                    >
+                      全部用呢個結果
+                    </button>
+                  )}
+                  {!potSuggestions.every(Boolean) && <div className="text-muted text-xs">其餘池手牌未知</div>}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Who won? */}
           {heroFolded && (
             <div className="result-auto-won result-folded-banner">You folded</div>
@@ -1025,19 +1168,7 @@ export default function HandRecorder() {
                         ? ' selected' + (pos !== hand.myPosition ? ' fold' : '')
                         : '')
                     }
-                    onClick={() => {
-                      if (heroFolded) {
-                        patchHand({ result: { ...hand.result, outcome: 'folded', winner: pos, amount: '' } });
-                        return;
-                      }
-                      const iWon = pos === hand.myPosition;
-                      patchHand({ result: {
-                        ...hand.result,
-                        outcome: iWon ? 'won' : 'lost',
-                        winner: pos,
-                        amount: iWon ? String(wonTake) : hand.result.amount || '',
-                      }});
-                    }}
+                    onClick={() => pickSingleWinner(pos)}
                   >
                     {pos === hand.myPosition ? 'Me' : pos}
                   </button>

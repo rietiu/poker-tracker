@@ -1,136 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { get, del } from '../db';
-import { formatCard, formatMoney, isRedCard, handNet, heroInvested, formatGame, formatWhen } from '../utils';
+import { formatMoney, isRedCard, handNet, heroInvested, formatGame, formatWhen } from '../utils';
 import { isMtt, handBlinds, chipSym, currentLevel, levelLabel, formatStacks } from '../mtt';
 import PositionBadge from '../components/PositionBadge';
+import { cleanOpponentCards, showdownHandNames } from '../showdown';
+import { generateHandText, hasShowdownData } from '../share';
 
+const SHOWDOWN_PREF_KEY = 'pt.shareShowdown';
 
-// ── Position labels ──────────────────────────────────────────────────────────
-const POS_ZH = {
-  SB: '小盲 (SB)', BB: '大盲 (BB)', UTG: '枪口位 (UTG)', 'UTG+1': '枪口+1',
-  MP: '中间位 (MP)', LJ: '左炮 (LJ)', HJ: '劫持位 (HJ)', CO: '关煞位 (CO)', BTN: '庄家位 (BTN)',
-};
-const ACTION_EN = { fold: 'fold', check: 'check', call: 'call', bet: 'bet', raise: 'raise' };
-const ACTION_ZH = { fold: '弃牌', check: '过牌', call: '跟注', bet: '下注', raise: '加注' };
-
-// ── Hand history generator ───────────────────────────────────────────────────
-function generateHandText(hand, session, lang) {
-  const zh = lang === 'zh';
-  const sym = chipSym(session);
-  const fmt = (n) => sym + Number(n).toLocaleString();
-  const card = (c) => c ? formatCard(c) : '?';
-  const cards = (arr) => (arr || []).filter(Boolean).map(card).join(' ');
-
-  const posLabel = (pos) => zh ? (POS_ZH[pos] || pos) : pos;
-  const actionWord = (a) => zh ? (ACTION_ZH[a] || a) : (ACTION_EN[a] || a);
-  const heroMark = zh ? '（我）' : ' (Hero)';
-  const myPos = hand.myPosition;
-
-  const lines = [];
-
-  // Header
-  const venue = session?.venue ? (zh ? `【${session.venue}】` : ` @ ${session.venue}`) : '';
-  lines.push(zh
-    ? `手牌 #${hand.handNum}${venue} — ${formatGame(session?.game, session?.currency)}`
-    : `Hand #${hand.handNum}${venue} — ${formatGame(session?.game, session?.currency)}`
-  );
-  lines.push(zh
-    ? `位置：${posLabel(myPos)}　手牌：${cards(hand.holeCards)}`
-    : `Position: ${posLabel(myPos)}  |  Hole cards: ${cards(hand.holeCards)}`
-  );
-  lines.push('');
-
-  // Street renderer
-  function renderStreet(label, labelZh, streetData, communityCards) {
-    if (!streetData) return;
-    const actions = streetData.actions || [];
-    const pot = streetData.pot || streetData.endPot || 0;
-    const startPot = streetData.startPot; // optional
-
-    const streetLabel = zh ? labelZh : label;
-    const potStr = pot > 0 ? (zh ? `（底池：${fmt(pot)}）` : ` (Pot: ${fmt(pot)})`) : '';
-    let header = streetLabel + potStr;
-    if (communityCards && communityCards.filter(Boolean).length > 0) {
-      header = streetLabel + `: ${cards(communityCards)}` + potStr;
-    }
-    lines.push('── ' + header);
-
-    for (const a of actions) {
-      const isMe = a.pos === myPos;
-      const posStr = posLabel(a.pos) + (isMe ? heroMark : '');
-      const amt = a.amount > 0 ? ` ${fmt(a.amount)}` : '';
-      lines.push(`  ${posStr}: ${actionWord(a.action)}${amt}`);
-    }
-
-    if (actions.length === 0) {
-      lines.push(zh ? '  （無行動記錄）' : '  (no actions recorded)');
-    }
-    lines.push('');
-  }
-
-  renderStreet('Pre-flop', '翻牌前', {
-    actions: hand.preflop?.actions || [],
-    pot: hand.preflop?.pot,
-  });
-
-  if (hand.flop) {
-    renderStreet('Flop', '翻牌', {
-      actions: hand.flop.actions || [],
-      pot: hand.flop.pot,
-    }, hand.flop.cards);
-  }
-
-  if (hand.turn) {
-    renderStreet('Turn', '轉牌', {
-      actions: hand.turn.actions || [],
-      pot: hand.turn.pot,
-    }, [hand.turn.card]);
-  }
-
-  if (hand.river) {
-    renderStreet('River', '河牌', {
-      actions: hand.river.actions || [],
-      pot: hand.river.pot,
-    }, [hand.river.card]);
-  }
-
-  // Result
-  const { outcome, amount, winner, notes } = hand.result || {};
-  lines.push(zh ? '── 結果' : '── Result');
-  if (outcome === 'won') {
-    lines.push(zh ? `  贏得 ${fmt(amount)}` : `  Won ${fmt(amount)}`);
-  } else if (outcome === 'lost') {
-    const winnerStr = winner && winner !== myPos ? ` (${zh ? '贏家：' : 'winner: '}${posLabel(winner)})` : '';
-    lines.push(zh ? `  輸掉 ${fmt(amount)}${winnerStr}` : `  Lost ${fmt(amount)}${winnerStr}`);
-  } else if (outcome === 'split') {
-    lines.push(zh ? `  平分 ±${fmt(amount)}` : `  Split ±${fmt(amount)}`);
-  } else if (outcome === 'folded') {
-    lines.push(zh ? '  棄牌' : '  Folded');
-  }
-  if (notes) {
-    lines.push(zh ? `  備注：${notes}` : `  Notes: ${notes}`);
-  }
-
-  // Street notes
-  ['preflop', 'flop', 'turn', 'river'].forEach(s => {
-    const n = hand[s]?.notes;
-    if (n) {
-      const streetName = zh
-        ? { preflop: '翻牌前', flop: '翻牌', turn: '轉牌', river: '河牌' }[s]
-        : { preflop: 'Pre-flop', flop: 'Flop', turn: 'Turn', river: 'River' }[s];
-      lines.push(zh ? `  ${streetName}備注：${n}` : `  ${streetName} note: ${n}`);
-    }
-  });
-
-  lines.push('');
-  lines.push(zh
-    ? '請幫我分析這手牌的打法是否正確，有什麼改進空間？'
-    : 'Please analyze this hand. Were my decisions correct? What could be improved?'
-  );
-
-  return lines.join('\n');
-}
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 function CardBadge({ card, large }) {
@@ -179,7 +57,16 @@ function StreetRow({ label, street, cards, sym }) {
 function ExportSheet({ hand, session, onClose }) {
   const [lang, setLang] = useState('en');
   const [copied, setCopied] = useState(false);
-  const text = generateHandText(hand, session, lang);
+  const showdownAvailable = hasShowdownData(hand);
+  const [includeShowdown, setIncludeShowdown] = useState(() => {
+    try { return localStorage.getItem(SHOWDOWN_PREF_KEY) === '1'; } catch { return false; }
+  });
+  const text = generateHandText(hand, session, lang, { includeShowdown: !showdownAvailable || includeShowdown });
+
+  function toggleShowdown(on) {
+    setIncludeShowdown(on);
+    try { localStorage.setItem(SHOWDOWN_PREF_KEY, on ? '1' : '0'); } catch { /* private mode */ }
+  }
 
   function handleCopy() {
     navigator.clipboard.writeText(text).then(() => {
@@ -210,6 +97,13 @@ function ExportSheet({ hand, session, onClose }) {
           <button className={'pill' + (lang === 'en' ? ' selected' : '')} onClick={() => setLang('en')}>English</button>
           <button className={'pill' + (lang === 'zh' ? ' selected' : '')} onClick={() => setLang('zh')}>中文</button>
         </div>
+
+        {showdownAvailable && (
+          <label className="row gap-8 mb-12 text-sm" style={{ cursor: 'pointer' }}>
+            <input type="checkbox" checked={includeShowdown} onChange={e => toggleShowdown(e.target.checked)} />
+            <span>包含攤牌（對手手牌＋牌型）</span>
+          </label>
+        )}
 
         <textarea
           className="export-textarea"
@@ -268,6 +162,16 @@ export default function HandDetail() {
   const invested = heroInvested(hand, blinds.sb, blinds.bb, blinds.ante);
   const levelText = isMtt(session) ? levelLabel(hand.blinds || currentLevel(session)) : '';
 
+  const oppEntries = Object.entries(cleanOpponentCards(hand.opponentCards));
+  const handNames = oppEntries.length
+    ? (showdownHandNames({
+        board: [...(hand.flop?.cards || []), hand.turn?.card, hand.river?.card].filter(Boolean),
+        heroHole: hand.holeCards,
+        myPosition: hand.myPosition,
+        opponentCards: hand.opponentCards,
+      }) || []).filter(h => !(outcome === 'folded' && h.pos === hand.myPosition))
+    : [];
+
   async function handleDelete() {
     await del('hands', id);
     navigate(-1);
@@ -306,6 +210,22 @@ export default function HandDetail() {
           </div>
         )}
         {hand.result?.notes && <div className="text-muted text-sm mt-8">{hand.result.notes}</div>}
+        {oppEntries.length > 0 && (
+          <div className="text-sm mt-8">
+            <span className="text-muted">對手：</span>
+            {oppEntries.map(([pos, cs], i) => (
+              <span key={pos}>
+                {i > 0 && <span className="text-muted"> · </span>}
+                {pos} {cs.map((c, j) => <CardBadge key={j} card={c} />)}
+              </span>
+            ))}
+          </div>
+        )}
+        {handNames.length > 0 && (
+          <div className="text-sm mt-8 text-muted">
+            {handNames.map(h => `${h.pos === hand.myPosition ? 'Me' : h.pos}: ${h.name}`).join(' · ')}
+          </div>
+        )}
       </div>
 
       {hand.seating?.length > 0 && (
