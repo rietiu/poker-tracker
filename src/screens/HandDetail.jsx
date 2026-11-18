@@ -59,7 +59,7 @@ function ExportSheet({ hand, session, onClose }) {
   const [copied, setCopied] = useState(false);
   const showdownAvailable = hasShowdownData(hand);
   const [includeShowdown, setIncludeShowdown] = useState(() => {
-    try { return localStorage.getItem(SHOWDOWN_PREF_KEY) !== '0'; } catch { return true; }
+    try { return localStorage.getItem(SHOWDOWN_PREF_KEY) === '1'; } catch { return false; }
   });
   const text = generateHandText(hand, session, lang, { includeShowdown: !showdownAvailable || includeShowdown });
 
